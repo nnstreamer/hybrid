@@ -1,3 +1,9 @@
+# Objective: Build the OpenPCC router image from upstream source.
+# Usage examples:
+# - docker build -t openpcc-router -f server-1/Dockerfile server-1
+# - docker build --build-arg OPENPCC_REF=main -t openpcc-router server-1
+# Notes:
+# - Produces a container with mem-router and mem-credithole binaries.
 ARG GO_VERSION=1.25.4
 
 FROM golang:${GO_VERSION}-bookworm AS build

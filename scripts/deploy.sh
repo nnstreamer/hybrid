@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Objective: Deploy OpenPCC router and compute nodes to AWS EC2.
+# Usage examples:
+# - COMPONENT=server-1 AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... ./scripts/deploy.sh
+# - COMPONENT=server-2 AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... COMPUTE_EIF_S3_URI=s3://bucket/compute.eif ./scripts/deploy.sh
+# - COMPONENT=all AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... ./scripts/deploy.sh
+# Notes:
+# - Requires AWS credentials in the environment.
+# - Compute instances require Nitro Enclaves enabled instance types.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

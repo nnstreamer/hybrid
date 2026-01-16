@@ -1,3 +1,8 @@
+# Objective: Configure router_com and router_agent for OpenPCC compute node.
+# Usage examples:
+# - Set ROUTER_ADDRESS=http://router:3600 and ROUTER_COM_PORT=8081
+# - Set MODEL_1=llama3.2:1b and LLM_BASE_URL=http://localhost:11434
+# - Provide overrides via environment variables (YAML supports ${VAR:-default})
 http:
   port: "${ROUTER_COM_PORT:-8081}"
 evidence:

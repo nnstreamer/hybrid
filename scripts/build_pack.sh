@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+# Objective: Build and optionally package OpenPCC component images.
+# Usage examples:
+# - COMPONENT=all ./scripts/build_pack.sh
+# - COMPONENT=server-1 IMAGE_TAG=dev ./scripts/build_pack.sh
+# - COMPONENT=server-2 BUILD_EIF=true ./scripts/build_pack.sh
+# - COMPONENT=all REGISTRY=123456789012.dkr.ecr.us-east-1.amazonaws.com PUSH=true ./scripts/build_pack.sh
+# Notes:
+# - BUILD_EIF=true requires nitro-cli on the runner.
+# - Set IMAGE_TAG, REGISTRY, and PUSH to control tagging and pushing.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

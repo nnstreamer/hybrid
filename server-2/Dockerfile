@@ -1,3 +1,9 @@
+# Objective: Build the OpenPCC compute node image from upstream source.
+# Usage examples:
+# - docker build -t openpcc-compute -f server-2/Dockerfile server-2
+# - docker build --build-arg CONFIDENTCOMPUTE_REF=main -t openpcc-compute server-2
+# Notes:
+# - Produces a container with compute_boot, router_com, and compute_worker.
 ARG GO_VERSION=1.25.4
 
 FROM golang:${GO_VERSION}-bookworm AS build

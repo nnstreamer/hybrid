@@ -1,3 +1,8 @@
+# Objective: Build/pack OpenPCC images and optional EIF artifacts.
+# Usage examples:
+# - Run workflow_dispatch with component=all and push=false
+# - Run workflow_dispatch with component=server-2 and build_eif=true
+# - Run workflow_dispatch with push=true to publish to ECR
 name: OpenPCC Proto 1 Build Pack
 
 on:

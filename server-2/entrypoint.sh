@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Objective: Start OpenPCC compute services with config files.
+# Usage examples:
+# - ./entrypoint.sh
+# - SKIP_COMPUTE_BOOT=true ./entrypoint.sh
+# - COMPUTE_BOOT_CONFIG=/etc/openpcc/compute_boot.yaml ROUTER_COM_CONFIG=/etc/openpcc/router_com.yaml ./entrypoint.sh
+# Notes:
+# - compute_boot runs in background unless SKIP_COMPUTE_BOOT=true.
+# - router_com runs in foreground and uses ROUTER_COM_CONFIG.
 set -euo pipefail
 
 CONFIG_DIR="/etc/openpcc"

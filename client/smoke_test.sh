@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Objective: Smoke test OpenPCC router and optional compute endpoints.
+# Usage examples:
+# - ./smoke_test.sh
+# - ROUTER_URL=http://router:3600 ./smoke_test.sh
+# - ROUTER_URL=http://router:3600 COMPUTE_URL=http://compute:8081 ./smoke_test.sh
+# Notes:
+# - Verifies /_health and /ping on the router, and /_health on compute when set.
 set -euo pipefail
 
 ROUTER_URL="${ROUTER_URL:-http://localhost:3600}"

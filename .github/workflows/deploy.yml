@@ -1,3 +1,8 @@
+# Objective: Deploy OpenPCC router and compute nodes to AWS.
+# Usage examples:
+# - Run workflow_dispatch with component=server-1 and ami_id set
+# - Run workflow_dispatch with component=server-2 and compute_eif_s3_uri set
+# - Run workflow_dispatch with component=all and required AWS inputs set
 name: OpenPCC Proto 1 Deploy
 
 on:
