@@ -1,0 +1,27 @@
+http:
+  port: "${ROUTER_COM_PORT:-8081}"
+evidence:
+  socket: "${EVIDENCE_SOCKET:-/tmp/router.sock}"
+  timeout: ${EVIDENCE_TIMEOUT:-30s}
+models:
+  - "${MODEL_1:-llama3.2:1b}"
+router_com:
+  check_compute_boot_exit: ${CHECK_COMPUTE_BOOT_EXIT:-false}
+  tpm:
+    device: "${TPM_DEVICE:-/dev/tpmrm0}"
+    simulate: ${SIMULATE_TPM:-true}
+    rek_handle: ${REK_HANDLE:-0x81000002}
+    simulator_cmd_address: ${SIMULATOR_CMD_ADDRESS:-}
+    simulator_platform_address: ${SIMULATOR_PLATFORM_ADDRESS:-}
+  worker:
+    binary_path: "${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
+    llm_base_url: "${LLM_BASE_URL:-http://localhost:11434}"
+    badge_public_key: "${BADGE_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQTFKNXJhQTdEZTQ0elFSRVpxU21BbkRMK1RObjFPUUROZW1sWmc4eWc3azg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
+router_agent:
+  tags:
+    - llm
+    - "engine=${INFERENCE_ENGINE_TYPE:-ollama}"
+    - "model=${MODEL_1:-llama3.2:1b}"
+  node_target_url: "http://${COMPUTE_HOST:-localhost}:${ROUTER_COM_PORT:-8081}/"
+  node_healthcheck_url: "http://${COMPUTE_HOST:-localhost}:${ROUTER_COM_PORT:-8081}/_health"
+  router_base_url: "${ROUTER_ADDRESS:-http://localhost:3600}"

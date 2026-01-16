@@ -1,0 +1,24 @@
+inference_engine:
+  type: ${INFERENCE_ENGINE_TYPE:-ollama}
+  skip: ${INFERENCE_ENGINE_SKIP:-false}
+  models:
+    - "${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
+  local_dev: ${INFERENCE_ENGINE_LOCAL_DEV:-true}
+  url: "${INFERENCE_ENGINE_URL:-http://localhost:11434}"
+  systemd_service_name: "${INFERENCE_ENGINE_SERVICE:-ollama.service}"
+tpm:
+  primary_key_handle: ${TPM_PRIMARY_KEY_HANDLE:-0x81000001}
+  child_key_handle: ${TPM_CHILD_KEY_HANDLE:-0x81000002}
+  rek_creation_ticket_handle: ${TPM_REK_TICKET_HANDLE:-0x01c0000A}
+  rek_creation_hash_handle: ${TPM_REK_HASH_HANDLE:-0x01c0000B}
+  attestation_key_handle: ${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
+  tpm_type: ${TPM_TYPE:-Simulator}
+  simulator_cmd_address: ${SIMULATOR_CMD_ADDRESS:-}
+  simulator_platform_address: ${SIMULATOR_PLATFORM_ADDRESS:-}
+attestation:
+  fake_secret: "${FAKE_ATTESTATION_SECRET:-123456}"
+gpu:
+  required: ${GPU_REQUIRED:-false}
+  attestation_mode: ${GPU_ATTESTATION_MODE:-none}
+transparency:
+  image_sigstore_bundle: "${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
