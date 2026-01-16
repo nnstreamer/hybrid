@@ -1,0 +1,110 @@
+name: OpenPCC Proto 1 Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        type: choice
+        description: Component to deploy
+        options:
+          - all
+          - server-1
+          - server-2
+        default: all
+      image_tag:
+        type: string
+        description: Image tag to deploy
+        default: ""
+      aws_region:
+        type: string
+        description: AWS region
+        default: "us-east-1"
+      subnet_id:
+        type: string
+        description: Subnet ID for instances
+        default: ""
+      security_group_id:
+        type: string
+        description: Security group ID
+        default: ""
+      instance_profile_arn:
+        type: string
+        description: IAM instance profile ARN for EC2
+        default: ""
+      key_name:
+        type: string
+        description: Optional EC2 key pair name
+        default: ""
+      ami_id:
+        type: string
+        description: Base AMI ID (Ubuntu 22.04 recommended)
+        default: ""
+      router_ami_id:
+        type: string
+        description: Router AMI ID override
+        default: ""
+      compute_ami_id:
+        type: string
+        description: Compute AMI ID override
+        default: ""
+      router_instance_type:
+        type: string
+        description: Router instance type
+        default: "t3.small"
+      compute_instance_type:
+        type: string
+        description: Compute instance type (Nitro Enclaves enabled)
+        default: "c5.2xlarge"
+      compute_eif_s3_uri:
+        type: string
+        description: Optional S3 URI for prebuilt EIF
+        default: ""
+      enclave_cpu_count:
+        type: string
+        description: Enclave CPU count
+        default: "2"
+      enclave_memory_mib:
+        type: string
+        description: Enclave memory (MiB)
+        default: "2048"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy
+        env:
+          COMPONENT: ${{ inputs.component }}
+          AWS_REGION: ${{ inputs.aws_region }}
+          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ inputs.subnet_id }}
+          SECURITY_GROUP_ID: ${{ inputs.security_group_id }}
+          INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn }}
+          KEY_NAME: ${{ inputs.key_name }}
+          AMI_ID: ${{ inputs.ami_id }}
+          ROUTER_AMI_ID: ${{ inputs.router_ami_id }}
+          COMPUTE_AMI_ID: ${{ inputs.compute_ami_id }}
+          ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
+          COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
+          COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri }}
+          ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count }}
+          ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib }}
+        run: bash scripts/deploy.sh

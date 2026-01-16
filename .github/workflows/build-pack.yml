@@ -1,0 +1,66 @@
+name: OpenPCC Proto 1 Build Pack
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        type: choice
+        description: Component to build/package
+        options:
+          - all
+          - client
+          - server-1
+          - server-2
+        default: all
+      push:
+        type: boolean
+        description: Push images to ECR
+        default: false
+      build_eif:
+        type: boolean
+        description: Build Nitro Enclave EIF for server-2
+        default: false
+      image_tag:
+        type: string
+        description: Image tag override (defaults to commit SHA)
+        default: ""
+      aws_region:
+        type: string
+        description: AWS region for ECR (required when push=true)
+        default: "us-east-1"
+
+jobs:
+  build-pack:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.push == true }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        if: ${{ inputs.push == true }}
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install Nitro CLI
+        if: ${{ inputs.build_eif == true }}
+        run: sudo apt-get update && sudo apt-get install -y aws-nitro-enclaves-cli
+
+      - name: Build and package
+        env:
+          COMPONENT: ${{ inputs.component }}
+          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+          PUSH: ${{ inputs.push }}
+          REGISTRY: ${{ inputs.push && steps.login-ecr.outputs.registry || '' }}
+          BUILD_EIF: ${{ inputs.build_eif }}
+        run: bash scripts/build_pack.sh
