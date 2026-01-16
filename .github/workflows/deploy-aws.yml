@@ -1,0 +1,57 @@
+name: deploy-aws
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Optional override for image tag"
+        required: false
+      build_run_id:
+        description: "Optional build-pack run id to fetch artifacts"
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts by run id
+        if: ${{ inputs.build_run_id != '' }}
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          run_id: ${{ inputs.build_run_id }}
+          name: pcc-images
+          path: dist
+
+      - name: Download latest build artifacts
+        if: ${{ inputs.build_run_id == '' }}
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: build-pack.yml
+          workflow_conclusion: success
+          branch: ${{ github.ref_name }}
+          name: pcc-images
+          path: dist
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy images to ECR
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+          ECR_REPOSITORY_SERVER1: ${{ secrets.ECR_REPOSITORY_SERVER1 }}
+          ECR_REPOSITORY_SERVER2: ${{ secrets.ECR_REPOSITORY_SERVER2 }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: scripts/deploy-aws.sh

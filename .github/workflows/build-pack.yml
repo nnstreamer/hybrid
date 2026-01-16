@@ -1,0 +1,30 @@
+name: build-pack
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - cursor/prototype-1-system-setup-02e8
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and pack images
+        run: scripts/build-pack.sh
+
+      - name: Upload image artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcc-images
+          path: dist
