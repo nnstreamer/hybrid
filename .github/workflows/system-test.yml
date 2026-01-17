@@ -1,0 +1,22 @@
+# Objective: Run the local end-to-end system_test.sh in CI.
+# Usage examples:
+# - Triggered automatically on pull_request.
+# - Manually run from workflow_dispatch.
+name: System Test (Docker)
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  system-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run system test
+        run: |
+          chmod +x system_test.sh
+          ./system_test.sh
