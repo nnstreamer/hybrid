@@ -98,3 +98,18 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 위 기본값들은 모두 설정 파일에서 확인할 수 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
 
+---
+
+## FAQ
+
+**Q1. 현 코드와 Pull request에 LLM serving을 위해 포함된 LLM model이 있는가?**  
+A. 아니요. 모델 파일은 포함되어 있지 않고 모델 이름만 설정에 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L27】
+
+**Q2. LLM model을 새로 가져오기 위해서는 어떠한 작업을 해주면 되는가?**  
+A. 런타임에 모델을 실제로 준비하고, `INFERENCE_ENGINE_MODEL_1`과 `MODEL_1`을 새 모델 이름으로 맞춘 뒤 `LLM_BASE_URL`이 올바른 런타임을 가리키도록 설정합니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
+
+**Q3. router_com.yaml 에도 모델 이름 정보가 들어가는 이유는?**  
+A. 라우터 등록/태그 기반 라우팅과 워커가 처리 가능한 모델 목록을 설정하기 위해서입니다.【F:server-2/config/router_com.yaml†L6-L27】
+
+**Q4. 사용할 LLM model을 compute node에 넣기 위해 필요한 작업은?**  
+A. 런타임이 모델을 실제로 보유하도록 준비하고(사전 로드), 설정에서 모델 이름과 런타임 주소를 일치시키면 됩니다.【F:server-2/Dockerfile†L1-L41】【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
