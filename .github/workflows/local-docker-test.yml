@@ -1,0 +1,68 @@
+# Objective: Run Docker-based component smoke tests on a local Ubuntu runner.
+# Usage examples:
+# - Register a self-hosted Ubuntu runner and run workflow_dispatch.
+# - Use this workflow to validate server-1/server-2/client containers locally.
+name: Local Docker Smoke Test
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  docker-smoke-test:
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build images
+        env:
+          COMPONENT: all
+          IMAGE_TAG: local
+          PUSH: "false"
+        run: bash scripts/build_pack.sh
+
+      - name: Create test network
+        run: docker network create openpcc-test
+
+      - name: Start router (server-1)
+        run: docker run -d --name router --network openpcc-test --network-alias router openpcc-router:local
+
+      - name: Start compute (server-2)
+        env:
+          ROUTER_ADDRESS: http://router:3600
+          COMPUTE_HOST: compute
+          INFERENCE_ENGINE_SKIP: "true"
+          TPM_TYPE: InMemorySimulator
+        run: |
+          docker run -d --name compute \
+            --network openpcc-test \
+            --network-alias compute \
+            -e ROUTER_ADDRESS \
+            -e COMPUTE_HOST \
+            -e INFERENCE_ENGINE_SKIP \
+            -e TPM_TYPE \
+            openpcc-compute:local
+
+      - name: Smoke test (client)
+        env:
+          ROUTER_URL: http://router:3600
+          COMPUTE_URL: http://compute:8081
+        run: |
+          for i in $(seq 1 12); do
+            if docker run --rm \
+              --network openpcc-test \
+              -e ROUTER_URL \
+              -e COMPUTE_URL \
+              openpcc-client:local; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f router compute || true
+          docker network rm openpcc-test || true
