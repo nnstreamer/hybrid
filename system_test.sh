@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# Objective:
+# - Run an end-to-end local system test for OpenPCC using Ollama + smollm:135m.
+# - Build images, start services, send a client request, and print the model response.
+#
+# Usage:
+# - bash ./system_test.sh
+# - MODEL_NAME=smollm:135m PROMPT_TEXT="Hello" bash ./system_test.sh
+# - IMAGE_TAG=local TPM_CMD_PORT=2321 TPM_PLATFORM_PORT=2322 bash ./system_test.sh
+#
+# Environment:
+# - Ubuntu host with sudo privileges (script installs missing packages).
+# - Docker daemon must be available; the script uses Docker for isolation.
+# - Internet access required (pulls Docker images and the model).
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+MODEL_NAME="${MODEL_NAME:-smollm:135m}"
+PROMPT_TEXT="${PROMPT_TEXT:-Explain what a cache is in one sentence.}"
+IMAGE_TAG="${IMAGE_TAG:-local}"
+
+TPM_CMD_PORT="${TPM_CMD_PORT:-2321}"
+TPM_PLATFORM_PORT="${TPM_PLATFORM_PORT:-2322}"
+
+TMP_DIR=""
+OPENPCC_DIR=""
+
+say() {
+  printf "\n[system-test] %s\n" "$*"
+}
+
+die() {
+  printf "\n[system-test][ERROR] %s\n" "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  set +e
+  if command -v docker >/dev/null 2>&1; then
+    docker rm -f openpcc-ollama openpcc-router openpcc-compute openpcc-tpm-sim >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${OPENPCC_DIR}" && -d "${OPENPCC_DIR}" ]]; then
+    rm -rf "${OPENPCC_DIR}"
+  fi
+  if [[ -n "${TMP_DIR}" && -d "${TMP_DIR}" ]]; then
+    rm -rf "${TMP_DIR}"
+  fi
+}
+trap cleanup EXIT
+
+if [[ ! -f "${ROOT_DIR}/scripts/build_pack.sh" ]]; then
+  die "scripts/build_pack.sh not found. Run this script from the repo root."
+fi
+
+SUDO=""
+if [[ "$(id -u)" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  else
+    die "sudo is required to install packages."
+  fi
+fi
+
+ensure_pkg() {
+  local cmd="$1"
+  local pkg="$2"
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    say "Installing ${pkg}..."
+    ${SUDO} apt-get update -y >/dev/null
+    ${SUDO} apt-get install -y "${pkg}" >/dev/null
+  fi
+}
+
+ensure_pkg git git
+ensure_pkg curl curl
+
+if ! command -v docker >/dev/null 2>&1; then
+  say "Installing docker..."
+  ${SUDO} apt-get update -y >/dev/null
+  ${SUDO} apt-get install -y docker.io >/dev/null
+fi
+
+DOCKER="docker"
+if ! docker info >/dev/null 2>&1; then
+  if ${SUDO} docker info >/dev/null 2>&1; then
+    DOCKER="${SUDO} docker"
+  else
+    say "Starting docker daemon..."
+    ${SUDO} systemctl start docker >/dev/null 2>&1 || true
+    ${SUDO} service docker start >/dev/null 2>&1 || true
+    if ! ${SUDO} docker info >/dev/null 2>&1; then
+      die "Docker daemon is not running. Start docker and retry."
+    fi
+    DOCKER="${SUDO} docker"
+  fi
+fi
+
+say "Building project images..."
+COMPONENT=all IMAGE_TAG="${IMAGE_TAG}" PUSH=false ${SUDO} bash "${ROOT_DIR}/scripts/build_pack.sh" >/dev/null
+
+TMP_DIR="$(mktemp -d)"
+
+say "Building TPM simulator image (swtpm)..."
+cat > "${TMP_DIR}/Dockerfile.tpm" <<'EOF'
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends swtpm && rm -rf /var/lib/apt/lists/*
+EXPOSE 2321 2322
+ENTRYPOINT ["swtpm", "socket", "--tpm2", "--tpmstate", "dir=/tmp/tpm", "--server", "type=tcp,port=2321,bind=0.0.0.0", "--ctrl", "type=tcp,port=2322,bind=0.0.0.0"]
+EOF
+${DOCKER} build -t openpcc-tpm-sim:local -f "${TMP_DIR}/Dockerfile.tpm" "${TMP_DIR}" >/dev/null
+
+say "Starting TPM simulator..."
+${DOCKER} run -d --name openpcc-tpm-sim --network host openpcc-tpm-sim:local >/dev/null
+
+say "Starting Ollama and pulling model (${MODEL_NAME})..."
+${DOCKER} rm -f openpcc-ollama >/dev/null 2>&1 || true
+${DOCKER} run -d --name openpcc-ollama --network host -e OLLAMA_HOST=0.0.0.0 ollama/ollama >/dev/null
+
+say "Waiting for Ollama to be ready..."
+for i in $(seq 1 30); do
+  if curl -fsS "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+say "Pulling model (${MODEL_NAME})..."
+${DOCKER} exec openpcc-ollama ollama pull "${MODEL_NAME}" >/dev/null
+
+say "Starting router (server-1)..."
+${DOCKER} rm -f openpcc-router >/dev/null 2>&1 || true
+${DOCKER} run -d --name openpcc-router --network host openpcc-router:${IMAGE_TAG} >/dev/null
+
+say "Starting compute (server-2)..."
+${DOCKER} rm -f openpcc-compute >/dev/null 2>&1 || true
+${DOCKER} run -d --name openpcc-compute --network host \
+  -e ROUTER_ADDRESS="http://localhost:3600" \
+  -e COMPUTE_HOST="localhost" \
+  -e LLM_BASE_URL="http://localhost:11434" \
+  -e MODEL_1="${MODEL_NAME}" \
+  -e INFERENCE_ENGINE_MODEL_1="${MODEL_NAME}" \
+  -e INFERENCE_ENGINE_TYPE="ollama" \
+  -e INFERENCE_ENGINE_SKIP="false" \
+  -e TPM_TYPE="Simulator" \
+  -e SIMULATE_TPM="true" \
+  -e SIMULATOR_CMD_ADDRESS="127.0.0.1:${TPM_CMD_PORT}" \
+  -e SIMULATOR_PLATFORM_ADDRESS="127.0.0.1:${TPM_PLATFORM_PORT}" \
+  openpcc-compute:${IMAGE_TAG} >/dev/null
+
+say "Waiting for router and compute health..."
+for i in $(seq 1 30); do
+  if curl -fsS "http://localhost:3600/_health" >/dev/null 2>&1 && \
+     curl -fsS "http://localhost:8081/_health" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 2
+done
+
+say "Preparing local OpenPCC client..."
+OPENPCC_DIR="$(mktemp -d)"
+git clone --depth 1 https://github.com/openpcc/openpcc.git "${OPENPCC_DIR}" >/dev/null
+
+mkdir -p "${OPENPCC_DIR}/cmd/local-system-test"
+cat > "${OPENPCC_DIR}/cmd/local-system-test/main.go" <<'EOF'
+package main
+
+import (
+	"context"
+	"crypto/ed25519"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+
+	"github.com/openpcc/openpcc"
+	"github.com/openpcc/openpcc/ahttp"
+	"github.com/openpcc/openpcc/anonpay"
+	"github.com/openpcc/openpcc/anonpay/currency"
+	"github.com/openpcc/openpcc/anonpay/wallet"
+	"github.com/openpcc/openpcc/auth/credentialing"
+	authclient "github.com/openpcc/openpcc/auth/client"
+	"github.com/openpcc/openpcc/internal/test/anonpaytest"
+	"github.com/openpcc/openpcc/inttest"
+)
+
+type fakeAuthClient struct {
+	badge credentialing.Badge
+}
+
+func (f fakeAuthClient) RemoteConfig() authclient.RemoteConfig {
+	return authclient.RemoteConfig{}
+}
+
+func (f fakeAuthClient) GetAttestationToken(ctx context.Context) (*anonpay.BlindedCredit, error) {
+	return anonpaytest.MustBlindCredit(ctx, ahttp.AttestationCurrencyValue), nil
+}
+
+func (f fakeAuthClient) GetCredit(ctx context.Context, amountNeeded int64) (*anonpay.BlindedCredit, error) {
+	val, err := currency.Rounded(float64(amountNeeded), 1.0)
+	if err != nil {
+		return nil, err
+	}
+	return anonpaytest.MustBlindCredit(ctx, val), nil
+}
+
+func (f fakeAuthClient) PutCredit(ctx context.Context, finalCredit *anonpay.BlindedCredit) error {
+	return nil
+}
+
+func (f fakeAuthClient) GetBadge(ctx context.Context) (credentialing.Badge, error) {
+	return f.badge, nil
+}
+
+func (f fakeAuthClient) Payee() *anonpay.Payee {
+	return anonpaytest.MustNewPayee()
+}
+
+type fixedPayment struct {
+	credit *anonpay.BlindedCredit
+}
+
+func (p *fixedPayment) Success(_ *anonpay.UnblindedCredit) error { return nil }
+func (p *fixedPayment) Credit() *anonpay.BlindedCredit          { return p.credit }
+func (p *fixedPayment) Cancel() error                           { return nil }
+
+type fixedWallet struct{}
+
+func (w *fixedWallet) BeginPayment(ctx context.Context, amount int64) (wallet.Payment, error) {
+	val, err := currency.Rounded(float64(amount), 1.0)
+	if err != nil {
+		return nil, err
+	}
+	return &fixedPayment{credit: anonpaytest.MustBlindCredit(ctx, val)}, nil
+}
+func (w *fixedWallet) Status() wallet.Status                     { return wallet.Status{} }
+func (w *fixedWallet) SetDefaultCreditAmount(_ int64) error       { return nil }
+func (w *fixedWallet) Close(_ context.Context) error              { return nil }
+
+func makeBadge(model string) (credentialing.Badge, error) {
+	badgeKey, err := inttest.NewTestBadgeKeyProvider().PrivateKey()
+	if err != nil {
+		return credentialing.Badge{}, err
+	}
+	creds := credentialing.Credentials{Models: []string{model}}
+	credBytes, err := creds.MarshalBinary()
+	if err != nil {
+		return credentialing.Badge{}, err
+	}
+	sig := ed25519.Sign(badgeKey, credBytes)
+	return credentialing.Badge{Credentials: creds, Signature: sig}, nil
+}
+
+func main() {
+	routerURL := os.Getenv("ROUTER_URL")
+	if routerURL == "" {
+		routerURL = "http://localhost:3600"
+	}
+	model := os.Getenv("MODEL_NAME")
+	if model == "" {
+		model = "smollm:135m"
+	}
+	prompt := os.Getenv("PROMPT_TEXT")
+	if prompt == "" {
+		prompt = "Explain what a cache is in one sentence."
+	}
+
+	badge, err := makeBadge(model)
+	if err != nil {
+		panic(err)
+	}
+
+	cfg := openpcc.DefaultConfig()
+	cfg.APIURL = "http://localhost:0000"
+	cfg.APIKey = "local-test"
+	cfg.PingRouter = false
+
+	client, err := openpcc.NewFromConfig(
+		context.Background(),
+		cfg,
+		openpcc.WithAuthClient(fakeAuthClient{badge: badge}),
+		openpcc.WithWallet(&fixedWallet{}),
+		openpcc.WithRouterURL(routerURL),
+		openpcc.WithAnonHTTPClient(&http.Client{}),
+		openpcc.WithFakeAttestationSecret("123456"),
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close(context.Background())
+
+	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","stream":false}`, model, prompt)
+	req, err := http.NewRequest("POST", "http://confsec.invalid/api/generate", strings.NewReader(body))
+	if err != nil {
+		panic(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Confsec-Node-Tags", "model="+model)
+
+	resp, err := client.RoundTrip(req)
+	if err != nil {
+		panic(err)
+	}
+	defer resp.Body.Close()
+
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("MODEL_RESPONSE=%s\n", string(out))
+}
+EOF
+
+say "Running client request..."
+${DOCKER} run --rm --network host \
+  -e ROUTER_URL="http://localhost:3600" \
+  -e MODEL_NAME="${MODEL_NAME}" \
+  -e PROMPT_TEXT="${PROMPT_TEXT}" \
+  -v "${OPENPCC_DIR}:/src" \
+  -w /src \
+  golang:1.25.4-bookworm \
+  go run -tags=include_fake_attestation ./cmd/local-system-test >/tmp/system_test_output.log
+
+say "Response received. Output:"
+cat /tmp/system_test_output.log
+
+if ! grep -q "MODEL_RESPONSE=" /tmp/system_test_output.log; then
+  die "Client did not return a response payload."
+fi
+
+say "SUCCESS: end-to-end LLM request completed."
