@@ -19,4 +19,4 @@ jobs:
       - name: Run system test
         run: |
           chmod +x system_test.sh
-          ./system_test.sh
+          sudo -E ./system_test.sh

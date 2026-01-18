@@ -27,6 +27,15 @@ TPM_PLATFORM_PORT="${TPM_PLATFORM_PORT:-2322}"
 TMP_DIR=""
 OPENPCC_DIR=""
 
+if [[ "${ELEVATED_RUN:-}" != "true" && "$(id -u)" -ne 0 ]]; then
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -E env ELEVATED_RUN=true bash "$0" "$@"
+  else
+    echo "[system-test][ERROR] sudo is required to run this script." >&2
+    exit 1
+  fi
+fi
+
 say() {
   printf "\n[system-test] %s\n" "$*"
 }
@@ -112,6 +121,7 @@ EOF
 ${DOCKER} build -t openpcc-tpm-sim:local -f "${TMP_DIR}/Dockerfile.tpm" "${TMP_DIR}" >/dev/null
 
 say "Starting TPM simulator..."
+${DOCKER} rm -f openpcc-tpm-sim >/dev/null 2>&1 || true
 ${DOCKER} run -d --name openpcc-tpm-sim --network host openpcc-tpm-sim:local >/dev/null
 
 say "Starting Ollama and pulling model (${MODEL_NAME})..."
