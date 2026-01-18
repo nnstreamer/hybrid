@@ -130,6 +130,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
   git autoconf-archive pkg-config build-essential automake gcc libssl-dev \
   && rm -rf /var/lib/apt/lists/*
+RUN git config --global http.sslVerify false
 WORKDIR /src
 RUN git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git /src
 WORKDIR /src/TPMCmd
