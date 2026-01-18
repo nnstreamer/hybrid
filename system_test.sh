@@ -286,6 +286,9 @@ func main() {
 	cfg.APIURL = "http://localhost:0000"
 	cfg.APIKey = "local-test"
 	cfg.PingRouter = false
+	policy := inttest.LocalDevIdentityPolicy()
+	cfg.TransparencyIdentityPolicy = &policy
+	cfg.TransparencyIdentityPolicySource = openpcc.IdentityPolicySourceConfigured
 
 	client, err := openpcc.NewFromConfig(
 		context.Background(),

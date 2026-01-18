@@ -177,3 +177,34 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 3. Build/Deploy 워크플로 실행
 
 여기까지 완료하면 GitHub Actions만으로 배포가 가능합니다.
+
+---
+
+## 11) 로컬 system_test.sh 실행 시 주의사항
+
+이 섹션은 로컬 통합 테스트(`system_test.sh`) 실행 중 겪는 문제를 예방하기 위한 안내입니다.
+
+### 11-1. sudo 실행 권장
+
+Docker 데몬 권한 문제를 피하려면 다음 방식으로 실행합니다.
+
+- `sudo -E ./system_test.sh`
+
+빌드/실행이 서로 다른 Docker 데몬을 사용하면 이미지가 보이지 않는 문제가 발생할 수 있습니다.
+
+### 11-2. 고정 컨테이너/포트 충돌
+
+스크립트는 고정된 컨테이너 이름과 호스트 포트를 사용합니다.
+
+- 컨테이너: `openpcc-tpm-sim`, `openpcc-ollama`, `openpcc-router`, `openpcc-compute`
+- 포트: 2321, 2322, 11434, 3600, 8081
+
+이미 동일한 컨테이너/포트가 사용 중이면 충돌이 발생할 수 있습니다.
+
+### 11-3. Transparency policy 에러
+
+로컬 클라이언트 코드에서 투명성 정책이 없으면 다음 에러가 날 수 있습니다.
+
+- `transparency identity policy source is 'configured' but no policy was provided`
+
+테스트 클라이언트 코드를 수정할 경우에는 `LocalDevIdentityPolicy`를 설정하세요.
