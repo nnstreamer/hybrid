@@ -17,11 +17,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 
 ARG CONFIDENTCOMPUTE_REF=main
+ARG COMPUTE_BOOT_BUILD_TAGS=
 RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git .
 
 RUN go mod download
 
-RUN go build -o /out/compute_boot ./cmd/compute_boot
+RUN if [ -n "${COMPUTE_BOOT_BUILD_TAGS}" ]; then \
+      go build -tags="${COMPUTE_BOOT_BUILD_TAGS}" -o /out/compute_boot ./cmd/compute_boot; \
+    else \
+      go build -o /out/compute_boot ./cmd/compute_boot; \
+    fi
 RUN go build -o /out/router_com ./cmd/router_com
 RUN go build -o /out/compute_worker ./cmd/compute_worker
 
