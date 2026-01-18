@@ -22,6 +22,17 @@ jobs:
           PUSH: "false"
         run: bash scripts/build_pack.sh
 
+      - name: Rebuild compute with fake attestation
+        env:
+          IMAGE_TAG: local
+          COMPUTE_BOOT_BUILD_TAGS: include_fake_attestation
+        run: |
+          docker build \
+            --build-arg "COMPUTE_BOOT_BUILD_TAGS=${COMPUTE_BOOT_BUILD_TAGS}" \
+            -t "openpcc-compute:${IMAGE_TAG}" \
+            -f server-2/Dockerfile \
+            server-2
+
       - name: Create test network
         run: docker network create openpcc-test
 
