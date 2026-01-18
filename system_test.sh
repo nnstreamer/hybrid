@@ -7,6 +7,7 @@
 # - bash ./system_test.sh
 # - MODEL_NAME=smollm:135m PROMPT_TEXT="Hello" bash ./system_test.sh
 # - IMAGE_TAG=local TPM_CMD_PORT=2321 TPM_PLATFORM_PORT=2322 bash ./system_test.sh
+#   (TPM_PLATFORM_PORT defaults to TPM_CMD_PORT+1 for mssim)
 #
 # Environment:
 # - Ubuntu host with sudo privileges (script installs missing packages).
@@ -22,7 +23,7 @@ PROMPT_TEXT="${PROMPT_TEXT:-Explain what a cache is in one sentence.}"
 IMAGE_TAG="${IMAGE_TAG:-local}"
 
 TPM_CMD_PORT="${TPM_CMD_PORT:-2321}"
-TPM_PLATFORM_PORT="${TPM_PLATFORM_PORT:-2322}"
+TPM_PLATFORM_PORT="${TPM_PLATFORM_PORT:-$((TPM_CMD_PORT + 1))}"
 
 TMP_DIR=""
 OPENPCC_DIR=""
@@ -43,6 +44,15 @@ say() {
 die() {
   printf "\n[system-test][ERROR] %s\n" "$*" >&2
   exit 1
+}
+
+normalize_tpm_ports() {
+  local expected_platform_port
+  expected_platform_port="$((TPM_CMD_PORT + 1))"
+  if [[ "${TPM_PLATFORM_PORT}" -ne "${expected_platform_port}" ]]; then
+    say "TPM_PLATFORM_PORT (${TPM_PLATFORM_PORT}) does not match TPM_CMD_PORT+1 (${expected_platform_port}); using ${expected_platform_port}."
+    TPM_PLATFORM_PORT="${expected_platform_port}"
+  fi
 }
 
 cleanup() {
@@ -71,6 +81,8 @@ if [[ "$(id -u)" -ne 0 ]]; then
     die "sudo is required to install packages."
   fi
 fi
+
+normalize_tpm_ports
 
 ensure_pkg() {
   local cmd="$1"
@@ -111,18 +123,26 @@ COMPONENT=all IMAGE_TAG="${IMAGE_TAG}" PUSH=false ${SUDO} bash "${ROOT_DIR}/scri
 
 TMP_DIR="$(mktemp -d)"
 
-say "Building TPM simulator image (swtpm)..."
+say "Building TPM simulator image (mssim)..."
 cat > "${TMP_DIR}/Dockerfile.tpm" <<'EOF'
-FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends swtpm && rm -rf /var/lib/apt/lists/*
+FROM ubuntu:22.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  git autoconf-archive pkg-config build-essential automake gcc libssl-dev \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+RUN git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git /src
+WORKDIR /src/TPMCmd
+RUN ./bootstrap && ./configure && make -j"$(nproc)"
+WORKDIR /tpm
 EXPOSE 2321 2322
-ENTRYPOINT ["swtpm", "socket", "--tpm2", "--tpmstate", "dir=/tmp/tpm", "--server", "type=tcp,port=2321,bind=0.0.0.0", "--ctrl", "type=tcp,port=2322,bind=0.0.0.0"]
+ENTRYPOINT ["/src/TPMCmd/Simulator/src/tpm2-simulator"]
 EOF
 ${DOCKER} build -t openpcc-tpm-sim:local -f "${TMP_DIR}/Dockerfile.tpm" "${TMP_DIR}" >/dev/null
 
 say "Starting TPM simulator..."
 ${DOCKER} rm -f openpcc-tpm-sim >/dev/null 2>&1 || true
-${DOCKER} run -d --name openpcc-tpm-sim --network host openpcc-tpm-sim:local >/dev/null
+${DOCKER} run -d --name openpcc-tpm-sim --network host openpcc-tpm-sim:local "${TPM_CMD_PORT}" >/dev/null
 
 say "Starting Ollama and pulling model (${MODEL_NAME})..."
 ${DOCKER} rm -f openpcc-ollama >/dev/null 2>&1 || true
