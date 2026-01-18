@@ -121,12 +121,15 @@ GitHub Actions → `OpenPCC Proto 1 Build Pack` 워크플로를 실행합니다.
 - `aws_region`: ECR 리전
 
 > EIF를 미리 생성해 S3에 저장하려면 `build_eif=true` 후 EIF 파일을 S3에 업로드하세요.
+> EIF 기본 출력 경로는 `artifacts/compute.eif`이며, 필요 시 `EIF_OUTPUT_DIR`로 변경할 수 있습니다.
 
 ---
 
 ## 7) 배포 워크플로 실행 (필수)
 
 GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
+
+> 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
 ### 7-1. 필수 입력값
 
@@ -166,7 +169,7 @@ EC2 내부에서 **ECR pull / S3 다운로드**가 필요하기 때문입니다.
 
 ### Q3. EIF는 꼭 필요하나요?
 Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.  
-즉시 테스트만 한다면 기본 Docker 기반으로도 실행할 수 있습니다(개발용).
+즉시 테스트만 한다면 로컬/CI에서 Docker 기반으로 실행할 수 있습니다(개발용).
 
 ---
 

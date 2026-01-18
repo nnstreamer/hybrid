@@ -18,9 +18,9 @@ However, in the first prototypes, this is not required.
 
 server-1 is the router (openpcc-router).
 
-server-2 is the compute node (openpcc-compute-app + openpcc-inference-engine) in enclave.
+server-2 is the compute node (ConfidentCompute: compute_boot, router_com, compute_worker) in enclave.
 
-client is an Android/Tizen helper for application writers with openpcc client.
+client is planned as an Android/Tizen helper for application writers with openpcc client, but is not included in this version.
 
 Github action scripts are stored at .github/workflows, which will use the resources in server-1, server-2, and client for corresponding actions.
 
@@ -32,9 +32,9 @@ In github workflows, the two steps should be explicitly separated so that develo
 
 Each component, TAOS-D, client, server-1, and server-2, should be also independently triggered to be built or deployed.
 
-Building: compiling source codes into a "installable and executable" binary package. E.g., .deb or .rpm.
-Packging: compiling such binary packages into a single binary "image" to be installed to a server. E.g., docker image.
-Deplouing: installing an image to a server.
+Building: building component Docker images (installable and executable container images).
+Packaging: optionally producing Nitro Enclave EIF artifacts from server-2 images.
+Deploying: installing an image to a server.
 
 ## Version 0.001, the first prototype
 

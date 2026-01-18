@@ -27,7 +27,12 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 ### 1-3. 런타임 주소
 
-`router_com.yaml`의 `LLM_BASE_URL`이 런타임 주소입니다. 기본값은 `http://localhost:11434`입니다.【F:server-2/config/router_com.yaml†L16-L19】
+런타임 주소는 두 곳에 설정됩니다:
+
+- `compute_boot.yaml`: `INFERENCE_ENGINE_URL`
+- `router_com.yaml`: `LLM_BASE_URL`
+
+기본값은 `http://localhost:11434`입니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L16-L19】
 
 ---
 
@@ -58,7 +63,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 ### 3-2. 런타임 주소 변경
 
-`LLM_BASE_URL`을 새 런타임 주소로 설정합니다.【F:server-2/config/router_com.yaml†L16-L19】
+`INFERENCE_ENGINE_URL`과 `LLM_BASE_URL`을 새 런타임 주소로 설정합니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L16-L19】
 
 ### 3-3. 런타임이 모델을 보유하고 있는지 확인
 
@@ -80,11 +85,12 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 ## Step 5) 최소 변경 체크리스트
 
-모델 또는 런타임을 바꿀 때 아래 3가지만 확인하면 됩니다:
+모델 또는 런타임을 바꿀 때 아래 4가지만 확인하면 됩니다:
 
 1. `INFERENCE_ENGINE_MODEL_1` (compute_boot)  
 2. `MODEL_1` (router_com)  
-3. `LLM_BASE_URL` (router_com)
+3. `INFERENCE_ENGINE_URL` (compute_boot)  
+4. `LLM_BASE_URL` (router_com)
 
 그리고 **LLM 런타임이 해당 모델을 실제로 보유하고 있어야** 합니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
 
