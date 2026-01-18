@@ -98,7 +98,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 say "Building project images..."
-COMPONENT=all IMAGE_TAG="${IMAGE_TAG}" PUSH=false ${SUDO} bash "${ROOT_DIR}/scripts/build_pack.sh" >/dev/null
+COMPONENT=all IMAGE_TAG="${IMAGE_TAG}" PUSH=false ${SUDO} bash "${ROOT_DIR}/scripts/build_pack.sh"
 
 TMP_DIR="$(mktemp -d)"
 
