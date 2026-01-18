@@ -10,6 +10,7 @@
 #   (TPM_PLATFORM_PORT defaults to TPM_CMD_PORT+1 for mssim)
 # - COMPUTE_BOOT_BUILD_TAGS=include_fake_attestation bash ./system_test.sh
 #   (Set COMPUTE_BOOT_BUILD_TAGS="" to require real TEE attestation)
+# - PROMPT_TEXTS=$'First prompt\nSecond prompt\nThird prompt' bash ./system_test.sh
 #
 # Environment:
 # - Ubuntu host with sudo privileges (script installs missing packages).
@@ -22,6 +23,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODEL_NAME="${MODEL_NAME:-smollm:135m}"
 PROMPT_TEXT="${PROMPT_TEXT:-Explain what a cache is in one sentence.}"
+PROMPT_TEXTS="${PROMPT_TEXTS:-}"
 IMAGE_TAG="${IMAGE_TAG:-local}"
 COMPUTE_BOOT_BUILD_TAGS="${COMPUTE_BOOT_BUILD_TAGS-include_fake_attestation}"
 
@@ -329,6 +331,74 @@ func makeBadge(model string) (credentialing.Badge, error) {
 	return credentialing.Badge{Credentials: creds, Signature: sig}, nil
 }
 
+type promptPair struct {
+	input  string
+	output string
+}
+
+func splitPrompts(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	var parts []string
+	if strings.Contains(trimmed, "\n") {
+		parts = strings.Split(trimmed, "\n")
+	} else if strings.Contains(trimmed, "||") {
+		parts = strings.Split(trimmed, "||")
+	} else {
+		parts = []string{trimmed}
+	}
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func ensureUniquePrompts(prompts []string) []string {
+	seen := make(map[string]int)
+	unique := make([]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		if count, ok := seen[prompt]; ok {
+			count++
+			seen[prompt] = count
+			prompt = fmt.Sprintf("%s (variant %d)", prompt, count)
+		} else {
+			seen[prompt] = 1
+		}
+		unique = append(unique, prompt)
+	}
+	return unique
+}
+
+func getPrompts() []string {
+	raw := os.Getenv("PROMPT_TEXTS")
+	prompts := splitPrompts(raw)
+	basePrompt := os.Getenv("PROMPT_TEXT")
+	if basePrompt == "" {
+		basePrompt = "Explain what a cache is in one sentence."
+	}
+	defaults := []string{
+		basePrompt,
+		"Give two key differences between RAM and disk storage.",
+		"In one sentence, define a CPU cache hit.",
+	}
+	if len(prompts) == 0 {
+		prompts = defaults
+	}
+	for len(prompts) < 3 {
+		prompts = append(prompts, defaults[len(prompts)%len(defaults)])
+	}
+	if len(prompts) > 3 {
+		prompts = prompts[:3]
+	}
+	return ensureUniquePrompts(prompts)
+}
+
 func main() {
 	routerURL := os.Getenv("ROUTER_URL")
 	if routerURL == "" {
@@ -338,10 +408,7 @@ func main() {
 	if model == "" {
 		model = "smollm:135m"
 	}
-	prompt := os.Getenv("PROMPT_TEXT")
-	if prompt == "" {
-		prompt = "Explain what a cache is in one sentence."
-	}
+	prompts := getPrompts()
 
 	badge, err := makeBadge(model)
 	if err != nil {
@@ -370,25 +437,34 @@ func main() {
 	}
 	defer client.Close(context.Background())
 
-	body := fmt.Sprintf(`{"model":"%s","prompt":"%s","stream":false}`, model, prompt)
-	req, err := http.NewRequest("POST", "http://confsec.invalid/api/generate", strings.NewReader(body))
-	if err != nil {
-		panic(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Confsec-Node-Tags", "model="+model)
+	pairs := make([]promptPair, 0, len(prompts))
+	for _, prompt := range prompts {
+		body := fmt.Sprintf(`{"model":"%s","prompt":"%s","stream":false}`, model, prompt)
+		req, err := http.NewRequest("POST", "http://confsec.invalid/api/generate", strings.NewReader(body))
+		if err != nil {
+			panic(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Confsec-Node-Tags", "model="+model)
 
-	resp, err := client.RoundTrip(req)
-	if err != nil {
-		panic(err)
+		resp, err := client.RoundTrip(req)
+		if err != nil {
+			panic(err)
+		}
+		out, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			panic(err)
+		}
+		pairs = append(pairs, promptPair{input: prompt, output: string(out)})
 	}
-	defer resp.Body.Close()
 
-	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		panic(err)
+	fmt.Println("LLM_RESULTS_START")
+	for i, pair := range pairs {
+		fmt.Printf("PAIR %d\nINPUT: %s\nOUTPUT: %s\n", i+1, pair.input, pair.output)
+		fmt.Println("----")
 	}
-	fmt.Printf("MODEL_RESPONSE=%s\n", string(out))
+	fmt.Println("LLM_RESULTS_END")
 }
 EOF
 
@@ -398,6 +474,7 @@ ${DOCKER} run --rm --network host \
   -e ROUTER_URL="http://localhost:3600" \
   -e MODEL_NAME="${MODEL_NAME}" \
   -e PROMPT_TEXT="${PROMPT_TEXT}" \
+  -e PROMPT_TEXTS="${PROMPT_TEXTS}" \
   -v "${OPENPCC_DIR}:/src" \
   -w /src \
   golang:1.25.4-bookworm \
@@ -413,10 +490,17 @@ fi
 say "Response received. Output:"
 cat /tmp/system_test_output.log
 
-if ! grep -q "MODEL_RESPONSE=" /tmp/system_test_output.log; then
-  say "Client did not return a response payload."
+if ! grep -q "LLM_RESULTS_START" /tmp/system_test_output.log; then
+  say "Client did not produce LLM result summary."
   diagnose_router_compute
-  die "Client did not return a response payload."
+  die "Client did not produce LLM result summary."
+fi
+
+pair_count="$(grep -c "^PAIR " /tmp/system_test_output.log || true)"
+if [[ "${pair_count}" -ne 3 ]]; then
+  say "Client did not return three LLM response pairs (found ${pair_count})."
+  diagnose_router_compute
+  die "Client did not return three LLM response pairs."
 fi
 
 say "SUCCESS: end-to-end LLM request completed."
