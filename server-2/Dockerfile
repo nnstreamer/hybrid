@@ -11,6 +11,7 @@ FROM golang:${GO_VERSION}-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     git \
+    libssl-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
