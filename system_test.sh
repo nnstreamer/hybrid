@@ -8,6 +8,8 @@
 # - MODEL_NAME=smollm:135m PROMPT_TEXT="Hello" bash ./system_test.sh
 # - IMAGE_TAG=local TPM_CMD_PORT=2321 TPM_PLATFORM_PORT=2322 bash ./system_test.sh
 #   (TPM_PLATFORM_PORT defaults to TPM_CMD_PORT+1 for mssim)
+# - COMPUTE_BOOT_BUILD_TAGS=include_fake_attestation bash ./system_test.sh
+#   (Set COMPUTE_BOOT_BUILD_TAGS="" to require real TEE attestation)
 #
 # Environment:
 # - Ubuntu host with sudo privileges (script installs missing packages).
@@ -21,6 +23,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MODEL_NAME="${MODEL_NAME:-smollm:135m}"
 PROMPT_TEXT="${PROMPT_TEXT:-Explain what a cache is in one sentence.}"
 IMAGE_TAG="${IMAGE_TAG:-local}"
+COMPUTE_BOOT_BUILD_TAGS="${COMPUTE_BOOT_BUILD_TAGS-include_fake_attestation}"
 
 TPM_CMD_PORT="${TPM_CMD_PORT:-2321}"
 TPM_PLATFORM_PORT="${TPM_PLATFORM_PORT:-$((TPM_CMD_PORT + 1))}"
@@ -153,6 +156,15 @@ fi
 
 say "Building project images..."
 COMPONENT=all IMAGE_TAG="${IMAGE_TAG}" PUSH=false ${SUDO} bash "${ROOT_DIR}/scripts/build_pack.sh"
+
+if [[ -n "${COMPUTE_BOOT_BUILD_TAGS}" ]]; then
+  say "Rebuilding compute image with compute_boot tags (${COMPUTE_BOOT_BUILD_TAGS})..."
+  ${DOCKER} build \
+    --build-arg "COMPUTE_BOOT_BUILD_TAGS=${COMPUTE_BOOT_BUILD_TAGS}" \
+    -t "openpcc-compute:${IMAGE_TAG}" \
+    -f "${ROOT_DIR}/server-2/Dockerfile" \
+    "${ROOT_DIR}/server-2"
+fi
 
 TMP_DIR="$(mktemp -d)"
 
