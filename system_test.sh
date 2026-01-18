@@ -55,6 +55,39 @@ normalize_tpm_ports() {
   fi
 }
 
+diagnose_router_compute() {
+  set +e
+  say "Diagnostics: router/compute connectivity"
+
+  say "Router /_health response:"
+  curl -fsS "http://localhost:3600/_health"
+  printf "\n"
+
+  say "Compute /_health response:"
+  curl -fsS "http://localhost:8081/_health"
+  printf "\n"
+
+  say "Router /compute-manifests response:"
+  curl -fsS "http://localhost:3600/compute-manifests"
+  printf "\n"
+
+  say "Container status (router/compute):"
+  ${DOCKER} ps --filter "name=openpcc-router" --filter "name=openpcc-compute"
+
+  say "Router logs (last 200 lines):"
+  ${DOCKER} logs --tail 200 openpcc-router
+
+  say "Compute logs (last 200 lines):"
+  ${DOCKER} logs --tail 200 openpcc-compute
+
+  say "Possible reasons to investigate:"
+  printf "[system-test] - Compute failed to register with router (registration error or crash).\n"
+  printf "[system-test] - Router is unreachable from compute (ROUTER_ADDRESS, network, or DNS issue).\n"
+  printf "[system-test] - Compute started but did not finish bootstrapping before client request.\n"
+  printf "[system-test] - Router is healthy but compute discovery is misconfigured.\n"
+  set -e
+}
+
 cleanup() {
   set +e
   if command -v docker >/dev/null 2>&1; then
@@ -348,6 +381,7 @@ func main() {
 EOF
 
 say "Running client request..."
+set +e
 ${DOCKER} run --rm --network host \
   -e ROUTER_URL="http://localhost:3600" \
   -e MODEL_NAME="${MODEL_NAME}" \
@@ -356,11 +390,20 @@ ${DOCKER} run --rm --network host \
   -w /src \
   golang:1.25.4-bookworm \
   go run -tags=include_fake_attestation ./cmd/local-system-test >/tmp/system_test_output.log
+client_status=$?
+set -e
+if [[ "${client_status}" -ne 0 ]]; then
+  say "Client request failed with exit code ${client_status}."
+  diagnose_router_compute
+  die "Client request failed. See diagnostics above."
+fi
 
 say "Response received. Output:"
 cat /tmp/system_test_output.log
 
 if ! grep -q "MODEL_RESPONSE=" /tmp/system_test_output.log; then
+  say "Client did not return a response payload."
+  diagnose_router_compute
   die "Client did not return a response payload."
 fi
 
