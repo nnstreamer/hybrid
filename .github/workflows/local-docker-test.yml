@@ -45,6 +45,7 @@ jobs:
           COMPUTE_HOST: compute
           INFERENCE_ENGINE_SKIP: "true"
           TPM_TYPE: InMemorySimulator
+          EVIDENCE_TIMEOUT: 120s
         run: |
           docker run -d --name compute \
             --network openpcc-test \
@@ -53,6 +54,7 @@ jobs:
             -e COMPUTE_HOST \
             -e INFERENCE_ENGINE_SKIP \
             -e TPM_TYPE \
+            -e EVIDENCE_TIMEOUT \
             openpcc-compute:local
 
       - name: Smoke test (client)
