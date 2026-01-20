@@ -162,7 +162,7 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
-### 7-1. 필수 입력값
+### 7-1. 필수 입력값 (직접 입력 또는 저장값 필요)
 
 - `aws_region`
 - `subnet_id`
@@ -180,6 +180,40 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 
 > `build_eif=true`인 경우 `compute_eif_s3_uri`는 필수입니다.  
 > `compute_eif_s3_uri`를 비우면 EC2 부팅 시 인스턴스 내부에서 EIF를 생성합니다(개발용).
+
+### 7-3. 입력값 기억(자동 저장) 기능
+
+Deploy 워크플로는 **입력값을 GitHub Actions Variables에 자동 저장**합니다.  
+다음 실행에서는 **입력값을 비워도 저장된 값이 자동으로 사용**됩니다.
+
+Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables → Actions → Variables
+
+**저장되는 변수 이름(Repository Variables)**
+- `OPENPCC_AWS_REGION`
+- `OPENPCC_SUBNET_ID`
+- `OPENPCC_ROUTER_SECURITY_GROUP_ID`
+- `OPENPCC_COMPUTE_SECURITY_GROUP_ID`
+- `OPENPCC_INSTANCE_PROFILE_ARN`
+- `OPENPCC_KEY_NAME`
+- `OPENPCC_AMI_ID`
+- `OPENPCC_ROUTER_AMI_ID`
+- `OPENPCC_COMPUTE_AMI_ID`
+- `OPENPCC_ROUTER_INSTANCE_TYPE`
+- `OPENPCC_COMPUTE_INSTANCE_TYPE`
+- `OPENPCC_COMPUTE_EIF_S3_URI`
+- `OPENPCC_ENCLAVE_CPU_COUNT`
+- `OPENPCC_ENCLAVE_MEMORY_MIB`
+
+> 이 값들은 **Secrets가 아니라 Variables**에 저장됩니다.  
+> 민감한 값은 저장하지 않는 것을 권장합니다.
+
+**동작 방식**
+- 입력값이 있으면 → 해당 값 사용 + 변수 업데이트
+- 입력값이 비어 있으면 → 저장된 변수값 사용
+- 값이 모두 비어 있으면 → 필수값 오류
+
+> GitHub UI가 입력칸을 자동으로 채워주지는 않지만,  
+> **비워두고 실행하면 저장값이 자동 적용**됩니다.
 
 ---
 

@@ -23,7 +23,7 @@ on:
       aws_region:
         type: string
         description: AWS region
-        default: "us-east-1"
+        default: ""
       subnet_id:
         type: string
         description: Subnet ID for instances
@@ -59,11 +59,11 @@ on:
       router_instance_type:
         type: string
         description: Router instance type
-        default: "t3.small"
+        default: ""
       compute_instance_type:
         type: string
         description: Compute instance type (Nitro Enclaves enabled)
-        default: "c5.2xlarge"
+        default: ""
       build_eif:
         type: boolean
         description: Build EIF on self-hosted runner and upload to S3
@@ -75,16 +75,19 @@ on:
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
-        default: "2"
+        default: ""
       enclave_memory_mib:
         type: string
         description: Enclave memory (MiB)
-        default: "2048"
+        default: ""
 
 jobs:
   build-eif:
     if: ${{ inputs.build_eif == true && (inputs.component == 'all' || inputs.component == 'server-2') }}
     runs-on: [self-hosted, nitro-eif]
+    env:
+      RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
+      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
     permissions:
       contents: read
       id-token: write
@@ -96,15 +99,15 @@ jobs:
 
       - name: Validate EIF inputs
         run: |
-          if [ -z "${{ inputs.compute_eif_s3_uri }}" ]; then
-            echo "compute_eif_s3_uri is required when build_eif=true."
+          if [ -z "${RESOLVED_COMPUTE_EIF_S3_URI}" ]; then
+            echo "compute_eif_s3_uri is required when build_eif=true (input or OPENPCC_COMPUTE_EIF_S3_URI)."
             exit 1
           fi
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ inputs.aws_region }}
+          aws-region: ${{ env.RESOLVED_AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
@@ -116,7 +119,7 @@ jobs:
         env:
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri }}
+          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
         run: |
           compute_image_uri="${REGISTRY}/openpcc-compute:${IMAGE_TAG}"
           docker pull "${compute_image_uri}"
@@ -127,13 +130,29 @@ jobs:
 
       - name: Set outputs
         id: set-output
-        run: echo "compute_eif_s3_uri=${{ inputs.compute_eif_s3_uri }}" >> "$GITHUB_OUTPUT"
+        run: echo "compute_eif_s3_uri=${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}" >> "$GITHUB_OUTPUT"
 
   deploy:
     needs: [build-eif]
     if: ${{ needs.build-eif.result == 'success' || needs.build-eif.result == 'skipped' }}
     runs-on: ubuntu-latest
+    env:
+      RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
+      RESOLVED_SUBNET_ID: ${{ inputs.subnet_id != '' && inputs.subnet_id || vars.OPENPCC_SUBNET_ID }}
+      RESOLVED_ROUTER_SECURITY_GROUP_ID: ${{ inputs.router_security_group_id != '' && inputs.router_security_group_id || vars.OPENPCC_ROUTER_SECURITY_GROUP_ID }}
+      RESOLVED_COMPUTE_SECURITY_GROUP_ID: ${{ inputs.compute_security_group_id != '' && inputs.compute_security_group_id || vars.OPENPCC_COMPUTE_SECURITY_GROUP_ID }}
+      RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
+      RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
+      RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
+      RESOLVED_ROUTER_AMI_ID: ${{ inputs.router_ami_id != '' && inputs.router_ami_id || vars.OPENPCC_ROUTER_AMI_ID }}
+      RESOLVED_COMPUTE_AMI_ID: ${{ inputs.compute_ami_id != '' && inputs.compute_ami_id || vars.OPENPCC_COMPUTE_AMI_ID }}
+      RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type != '' && inputs.router_instance_type || vars.OPENPCC_ROUTER_INSTANCE_TYPE || 't3.small' }}
+      RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type != '' && inputs.compute_instance_type || vars.OPENPCC_COMPUTE_INSTANCE_TYPE || 'c5.2xlarge' }}
+      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.build-eif.outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
+      RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
+      RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
     permissions:
+      actions: write
       contents: read
       id-token: write
     steps:
@@ -143,7 +162,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ inputs.aws_region }}
+          aws-region: ${{ env.RESOLVED_AWS_REGION }}
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
@@ -154,20 +173,63 @@ jobs:
       - name: Deploy
         env:
           COMPONENT: ${{ inputs.component }}
-          AWS_REGION: ${{ inputs.aws_region }}
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          SUBNET_ID: ${{ inputs.subnet_id }}
-          ROUTER_SECURITY_GROUP_ID: ${{ inputs.router_security_group_id }}
-          COMPUTE_SECURITY_GROUP_ID: ${{ inputs.compute_security_group_id }}
-          INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn }}
-          KEY_NAME: ${{ inputs.key_name }}
-          AMI_ID: ${{ inputs.ami_id }}
-          ROUTER_AMI_ID: ${{ inputs.router_ami_id }}
-          COMPUTE_AMI_ID: ${{ inputs.compute_ami_id }}
-          ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
-          COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
-          COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.build-eif.outputs.compute_eif_s3_uri }}
-          ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count }}
-          ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          ROUTER_SECURITY_GROUP_ID: ${{ env.RESOLVED_ROUTER_SECURITY_GROUP_ID }}
+          COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          ROUTER_AMI_ID: ${{ env.RESOLVED_ROUTER_AMI_ID }}
+          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
+          ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
+          COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
+          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
+          ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
+          ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
         run: bash scripts/deploy.sh
+
+      - name: Persist deploy defaults
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          update_var() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              return 0
+            fi
+            local payload
+            payload=$(python - <<PY
+import json
+print(json.dumps({"name": "${name}", "value": "${value}"}))
+PY
+)
+            local api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables/${name}"
+            curl -sS -X PATCH \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${api}" \
+              -d "${payload}" >/dev/null \
+              || curl -sS -X POST \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables" \
+                -d "${payload}" >/dev/null
+          }
+          update_var OPENPCC_AWS_REGION "${RESOLVED_AWS_REGION}"
+          update_var OPENPCC_SUBNET_ID "${RESOLVED_SUBNET_ID}"
+          update_var OPENPCC_ROUTER_SECURITY_GROUP_ID "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
+          update_var OPENPCC_COMPUTE_SECURITY_GROUP_ID "${RESOLVED_COMPUTE_SECURITY_GROUP_ID}"
+          update_var OPENPCC_INSTANCE_PROFILE_ARN "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          update_var OPENPCC_KEY_NAME "${RESOLVED_KEY_NAME}"
+          update_var OPENPCC_AMI_ID "${RESOLVED_AMI_ID}"
+          update_var OPENPCC_ROUTER_AMI_ID "${RESOLVED_ROUTER_AMI_ID}"
+          update_var OPENPCC_COMPUTE_AMI_ID "${RESOLVED_COMPUTE_AMI_ID}"
+          update_var OPENPCC_ROUTER_INSTANCE_TYPE "${RESOLVED_ROUTER_INSTANCE_TYPE}"
+          update_var OPENPCC_COMPUTE_INSTANCE_TYPE "${RESOLVED_COMPUTE_INSTANCE_TYPE}"
+          update_var OPENPCC_COMPUTE_EIF_S3_URI "${RESOLVED_COMPUTE_EIF_S3_URI}"
+          update_var OPENPCC_ENCLAVE_CPU_COUNT "${RESOLVED_ENCLAVE_CPU_COUNT}"
+          update_var OPENPCC_ENCLAVE_MEMORY_MIB "${RESOLVED_ENCLAVE_MEMORY_MIB}"
