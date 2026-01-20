@@ -25,6 +25,10 @@ on:
         type: boolean
         description: Build Nitro Enclave EIF for server-2
         default: false
+      compute_eif_s3_uri:
+        type: string
+        description: S3 URI to upload compute EIF (required when build_eif=true)
+        default: ""
       image_tag:
         type: string
         description: Image tag override (defaults to commit SHA)
@@ -35,7 +39,7 @@ on:
         default: "us-east-1"
 
 jobs:
-  build-pack:
+  build-images:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -43,6 +47,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate EIF inputs
+        if: ${{ inputs.build_eif == true }}
+        run: |
+          if [ "${{ inputs.push }}" != "true" ]; then
+            echo "build_eif requires push=true so the EIF builder can pull from ECR."
+            exit 1
+          fi
+          if [ -z "${{ inputs.compute_eif_s3_uri }}" ]; then
+            echo "build_eif requires compute_eif_s3_uri for S3 upload."
+            exit 1
+          fi
 
       - name: Configure AWS credentials
         if: ${{ inputs.push == true }}
@@ -57,24 +73,56 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Install Nitro CLI
-        if: ${{ inputs.build_eif == true }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libtool libudev-dev libssl-dev e2fsprogs cargo
-          sudo apt-get install -y linux-modules-extra-aws git
-          git clone https://github.com/aws/aws-nitro-enclaves-cli.git
-          pushd aws-nitro-enclaves-cli
-          cargo build --release
-          sudo install -m 0755 target/release/nitro-cli /usr/bin/nitro-cli
-          popd
-          nitro-cli --version
-
       - name: Build and package
         env:
           COMPONENT: ${{ inputs.component }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
           PUSH: ${{ inputs.push }}
           REGISTRY: ${{ inputs.push && steps.login-ecr.outputs.registry || '' }}
-          BUILD_EIF: ${{ inputs.build_eif }}
+          BUILD_EIF: "false"
         run: bash scripts/build_pack.sh
+
+  build-eif:
+    if: ${{ inputs.build_eif == true }}
+    runs-on: [self-hosted, nitro-eif]
+    needs: build-images
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      compute_eif_s3_uri: ${{ steps.set-output.outputs.compute_eif_s3_uri }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ inputs.aws_region }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build EIF and upload to S3
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri }}
+        run: |
+          if [ -z "${COMPUTE_EIF_S3_URI}" ]; then
+            echo "compute_eif_s3_uri is required when build_eif=true."
+            exit 1
+          fi
+          compute_image_uri="${REGISTRY}/openpcc-compute:${IMAGE_TAG}"
+          docker pull "${compute_image_uri}"
+          sudo mkdir -p /opt/openpcc
+          sudo nitro-cli build-enclave --docker-uri "${compute_image_uri}" \
+            --output-file /opt/openpcc/compute.eif
+          aws s3 cp /opt/openpcc/compute.eif "${COMPUTE_EIF_S3_URI}"
+
+      - name: Set outputs
+        id: set-output
+        run: echo "compute_eif_s3_uri=${{ inputs.compute_eif_s3_uri }}" >> "$GITHUB_OUTPUT"
