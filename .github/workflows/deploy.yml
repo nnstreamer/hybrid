@@ -134,7 +134,7 @@ jobs:
 
   deploy:
     needs: [build-eif]
-    if: ${{ needs.build-eif.result == 'success' || needs.build-eif.result == 'skipped' }}
+    if: ${{ always() && (needs.build-eif.result == 'success' || needs.build-eif.result == 'skipped') }}
     runs-on: ubuntu-latest
     env:
       RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
