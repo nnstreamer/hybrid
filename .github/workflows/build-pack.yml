@@ -51,6 +51,10 @@ jobs:
       - name: Validate EIF inputs
         if: ${{ inputs.build_eif == true }}
         run: |
+          if [ "${{ inputs.component }}" != "server-2" ] && [ "${{ inputs.component }}" != "all" ]; then
+            echo "build_eif is only supported for component=server-2 or all."
+            exit 1
+          fi
           if [ "${{ inputs.push }}" != "true" ]; then
             echo "build_eif requires push=true so the EIF builder can pull from ECR."
             exit 1
@@ -83,7 +87,7 @@ jobs:
         run: bash scripts/build_pack.sh
 
   build-eif:
-    if: ${{ inputs.build_eif == true }}
+    if: ${{ inputs.build_eif == true && (inputs.component == 'all' || inputs.component == 'server-2') }}
     runs-on: [self-hosted, nitro-eif]
     needs: build-images
     permissions:
