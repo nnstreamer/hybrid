@@ -59,7 +59,16 @@ jobs:
 
       - name: Install Nitro CLI
         if: ${{ inputs.build_eif == true }}
-        run: sudo apt-get update && sudo apt-get install -y aws-nitro-enclaves-cli
+        run:
+          sudo apt-get update
+	  sudo apt-get install -y build-essential pkg-config libtool libudev-dev libssl-dev e2fsprogs cargo
+          sudo apt-get install -y linux-modules-extra-aws git
+	  git clone https://github.com/aws/aws-nitro-enclaves-cli.git
+	  pushd aws-nitro-enclaves-cli
+	  cargo build --release
+	  sudo install -m 0755 target/release/nitro-cli /usr/bin/nitro-cli
+	  popd
+	  nitro-cli --version
 
       - name: Build and package
         env:
