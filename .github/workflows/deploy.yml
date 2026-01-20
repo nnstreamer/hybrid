@@ -28,9 +28,13 @@ on:
         type: string
         description: Subnet ID for instances
         default: ""
-      security_group_id:
+      router_security_group_id:
         type: string
-        description: Security group ID
+        description: Security group ID for router (server-1)
+        default: ""
+      compute_security_group_id:
+        type: string
+        description: Security group ID for compute (server-2)
         default: ""
       instance_profile_arn:
         type: string
@@ -154,7 +158,8 @@ jobs:
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           SUBNET_ID: ${{ inputs.subnet_id }}
-          SECURITY_GROUP_ID: ${{ inputs.security_group_id }}
+          ROUTER_SECURITY_GROUP_ID: ${{ inputs.router_security_group_id }}
+          COMPUTE_SECURITY_GROUP_ID: ${{ inputs.compute_security_group_id }}
           INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn }}
           KEY_NAME: ${{ inputs.key_name }}
           AMI_ID: ${{ inputs.ami_id }}

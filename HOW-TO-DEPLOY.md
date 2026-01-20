@@ -10,7 +10,7 @@
 - [ ] AWS 계정 준비
 - [ ] GitHub Actions Secrets에 AWS 키 저장
 - [ ] ECR 리포지토리 생성
-- [ ] VPC Subnet, Security Group 준비
+- [ ] VPC Subnet, Security Group 준비 (router/compute 분리 권장)
 - [ ] EC2 Instance Profile(역할) 준비
 - [ ] AMI ID(예: Ubuntu 22.04) 결정
 - [ ] (선택) EIF 자동화를 위한 self-hosted runner 준비
@@ -71,7 +71,7 @@ AWS 콘솔 → ECR → Create repository
 
 배포할 VPC의 **퍼블릭 Subnet ID**가 필요합니다.
 
-### 3-2. Security Group 예시
+### 3-2. Security Group 예시 (권장: 분리)
 
 - Router(서버-1)
   - TCP 3600 (router)
@@ -166,7 +166,8 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 
 - `aws_region`
 - `subnet_id`
-- `security_group_id`
+- `router_security_group_id`
+- `compute_security_group_id`
 - `instance_profile_arn`
 - `ami_id` (또는 router/compute 전용 AMI)
 
