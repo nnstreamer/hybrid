@@ -21,15 +21,17 @@
 > 이 레포의 워크플로는 `configure-aws-credentials`에서 **Access Key 기반 인증**을 사용합니다.
 > IAM Role 기반(OIDC)으로 바꾸려면 워크플로 수정이 필요합니다.
 
-## EC2 권장 사양
-- **인스턴스 타입**: Nitro Enclaves 지원 타입
-  - 예: `c6a.2xlarge` (권장), `c5.2xlarge`, `m6a.2xlarge` 등
+## EC2 최소 사양 (EIF 빌드 기준)
+- **인스턴스 타입**: Nitro Enclaves 지원 타입 중 **large 이상**
+  - 예: `c6a.large` (2 vCPU, 4GiB), `c5.large`, `m6a.large` 등
 - **AMI**: Ubuntu 22.04 LTS
-- **디스크**: gp3 50GiB 이상 권장
+- **디스크**: gp3 30GiB 이상 (최소)
 - **네트워크**: 아웃바운드 443 허용 (ECR/S3 접근)
 - **IAM Role (선택)**: ECR read + S3 write 권한
   - 워크플로는 Access Key를 사용하므로 필수는 아니지만,
     운영 환경에서는 최소 권한을 갖춘 전용 Role을 권장합니다.
+
+> 빌드 시간이 길거나 이미지가 큰 경우 `xlarge` 이상으로 증설하는 것이 좋습니다.
 
 ## 설치 및 설정 절차
 

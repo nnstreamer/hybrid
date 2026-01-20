@@ -129,31 +129,10 @@ GitHub Actions → `OpenPCC Proto 1 Build Pack` 워크플로를 실행합니다.
 ### 6-1) EIF 자동화를 위한 Self-hosted Runner 준비 (선택)
 
 GitHub hosted runner(ubuntu-latest)에서는 Nitro Enclaves 환경이 없어 EIF 생성이 실패합니다.  
-EIF 자동화를 하려면 **AWS 내 self-hosted runner**를 별도로 준비해야 합니다.
+EIF 자동화를 하려면 **AWS 내 self-hosted runner**를 별도로 준비해야 합니다.  
+설정 절차와 최소 사양은 아래 문서를 참고하세요.
 
-**권장 구성 요약**
-- 인스턴스 타입: Nitro Enclaves 지원 타입 (예: `c6a.2xlarge`)
-- AMI: Ubuntu 22.04 LTS
-- 디스크: gp3 50GiB 이상 권장
-- IAM Role: ECR read + S3 write(업로드) 권한
-- 네트워크: 아웃바운드 443 허용 (ECR/S3 접근)
-
-**필수 패키지/서비스**
-```bash
-sudo apt-get update
-sudo apt-get install -y docker.io awscli aws-nitro-enclaves-cli linux-modules-extra-aws
-sudo systemctl enable --now docker
-sudo systemctl enable --now nitro-enclaves-allocator
-```
-
-**GitHub Runner 등록**
-1. GitHub → Settings → Actions → Runners → New self-hosted runner
-2. 인스턴스에서 runner 설치/등록
-3. 라벨을 **`nitro-eif`**로 지정  
-   (워크플로는 `runs-on: [self-hosted, nitro-eif]`를 사용)
-
-> Self-hosted runner는 GitHub Secrets에 접근할 수 있으므로,  
-> **전용 인스턴스로 격리**하고 최소 권한만 부여하는 것을 권장합니다.
+- [DEPLOY_BUILDER_FOR_EIF.md](./DEPLOY_BUILDER_FOR_EIF.md)
 
 ---
 
