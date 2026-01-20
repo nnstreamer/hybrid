@@ -203,18 +203,8 @@ jobs:
             fi
             local update_payload
             local create_payload
-            update_payload=$(VAR_VALUE="${value}" python - <<'PY'
-import json
-import os
-print(json.dumps({"value": os.environ["VAR_VALUE"]}))
-PY
-)
-            create_payload=$(VAR_NAME="${name}" VAR_VALUE="${value}" python - <<'PY'
-import json
-import os
-print(json.dumps({"name": os.environ["VAR_NAME"], "value": os.environ["VAR_VALUE"]}))
-PY
-)
+            update_payload=$(VAR_VALUE="${value}" python -c 'import json, os; print(json.dumps({"value": os.environ["VAR_VALUE"]}))')
+            create_payload=$(VAR_NAME="${name}" VAR_VALUE="${value}" python -c 'import json, os; print(json.dumps({"name": os.environ["VAR_NAME"], "value": os.environ["VAR_VALUE"]}))')
             local api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/variables/${name}"
             local status
             status=$(curl -sS -o /dev/null -w "%{http_code}" -X PATCH \
