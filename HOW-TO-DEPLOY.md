@@ -13,6 +13,7 @@
 - [ ] VPC Subnet, Security Group 준비
 - [ ] EC2 Instance Profile(역할) 준비
 - [ ] AMI ID(예: Ubuntu 22.04) 결정
+- [ ] (선택) EIF 자동화를 위한 self-hosted runner 준비
 - [ ] GitHub Actions에서 Build/Deploy 워크플로 실행
 
 ---
@@ -118,10 +119,40 @@ GitHub Actions → `OpenPCC Proto 1 Build Pack` 워크플로를 실행합니다.
 - `component`: `all` / `server-1` / `server-2` / `client`
 - `push`: `true`면 ECR로 푸시
 - `build_eif`: `true`면 EIF 생성 시도
+- `compute_eif_s3_uri`: EIF를 업로드할 S3 경로 (build_eif=true일 때 필수)
 - `aws_region`: ECR 리전
 
-> EIF를 미리 생성해 S3에 저장하려면 `build_eif=true` 후 EIF 파일을 S3에 업로드하세요.
-> EIF 기본 출력 경로는 `artifacts/compute.eif`이며, 필요 시 `EIF_OUTPUT_DIR`로 변경할 수 있습니다.
+> `build_eif=true`를 쓰려면 **push=true**가 필요합니다.  
+> EIF는 S3에 업로드되며, 경로는 `compute_eif_s3_uri`로 지정합니다.
+
+### 6-1) EIF 자동화를 위한 Self-hosted Runner 준비 (선택)
+
+GitHub hosted runner(ubuntu-latest)에서는 Nitro Enclaves 환경이 없어 EIF 생성이 실패합니다.  
+EIF 자동화를 하려면 **AWS 내 self-hosted runner**를 별도로 준비해야 합니다.
+
+**권장 구성 요약**
+- 인스턴스 타입: Nitro Enclaves 지원 타입 (예: `c6a.2xlarge`)
+- AMI: Ubuntu 22.04 LTS
+- 디스크: gp3 50GiB 이상 권장
+- IAM Role: ECR read + S3 write(업로드) 권한
+- 네트워크: 아웃바운드 443 허용 (ECR/S3 접근)
+
+**필수 패키지/서비스**
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io awscli aws-nitro-enclaves-cli linux-modules-extra-aws
+sudo systemctl enable --now docker
+sudo systemctl enable --now nitro-enclaves-allocator
+```
+
+**GitHub Runner 등록**
+1. GitHub → Settings → Actions → Runners → New self-hosted runner
+2. 인스턴스에서 runner 설치/등록
+3. 라벨을 **`nitro-eif`**로 지정  
+   (워크플로는 `runs-on: [self-hosted, nitro-eif]`를 사용)
+
+> Self-hosted runner는 GitHub Secrets에 접근할 수 있으므로,  
+> **전용 인스턴스로 격리**하고 최소 권한만 부여하는 것을 권장합니다.
 
 ---
 
@@ -143,7 +174,11 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 
 - `key_name` (EC2 SSH 키, 필요 시)
 - `compute_eif_s3_uri` (S3의 EIF 경로)
+- `build_eif` (EIF를 self-hosted runner에서 자동 생성)
 - 인스턴스 타입 변경
+
+> `build_eif=true`인 경우 `compute_eif_s3_uri`는 필수입니다.  
+> `compute_eif_s3_uri`를 비우면 EC2 부팅 시 인스턴스 내부에서 EIF를 생성합니다(개발용).
 
 ---
 
