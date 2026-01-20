@@ -123,6 +123,7 @@ GitHub Actions → `OpenPCC Proto 1 Build Pack` 워크플로를 실행합니다.
 - `aws_region`: ECR 리전
 
 > `build_eif=true`를 쓰려면 **push=true**가 필요합니다.  
+> `build_eif`는 **`component=server-2` 또는 `all`일 때만 지원**합니다.  
 > EIF는 S3에 업로드되며, 경로는 `compute_eif_s3_uri`로 지정합니다.
 
 ### 6-1) EIF 자동화를 위한 Self-hosted Runner 준비 (선택)
@@ -214,6 +215,9 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 
 > GitHub UI가 입력칸을 자동으로 채워주지는 않지만,  
 > **비워두고 실행하면 저장값이 자동 적용**됩니다.
+>
+> 변수 저장 단계에서 **API 호출이 실패하면 워크플로가 실패**합니다.  
+> 따라서 해당 리포지토리의 **Actions Variables 쓰기 권한**이 필요합니다.
 
 ---
 
