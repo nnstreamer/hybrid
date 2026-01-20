@@ -91,10 +91,25 @@ EC2 인스턴스가 ECR 및 S3에 접근하려면 Instance Profile(역할)이 �
 1. IAM → Roles → Create role
 2. Use case: EC2
 3. 권한 예시: ECR read + S3 read(옵션)
+   - `AmazonEC2ContainerRegistryReadOnly`
+   - `AmazonS3ReadOnlyAccess` (EIF를 S3에서 내려받을 경우)
+   - 가능하면 S3는 **특정 버킷/경로만 허용**하는 커스텀 정책으로 최소권한 적용 권장
 
 ### 4-2. Instance Profile ARN 확인
 
-Role 생성 후 ARN을 복사해 둡니다.
+Role 생성 후 동일 이름의 **Instance Profile**이 자동 생성됩니다.
+아래 경로에서 **Instance Profile ARN**을 복사해 두세요.
+
+- IAM → Roles → (방금 만든 Role 선택) → Summary → **Instance profile ARN**
+
+> 주의: **Role ARN과 Instance Profile ARN은 다릅니다.**  
+> 배포 입력값에는 **Instance Profile ARN**을 사용해야 합니다.
+
+CLI로 확인하려면:
+```bash
+aws iam list-instance-profiles-for-role --role-name <ROLE_NAME>
+```
+출력의 `Arn` 값이 Instance Profile ARN입니다.
 
 ---
 
