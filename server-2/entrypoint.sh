@@ -12,9 +12,11 @@ set -euo pipefail
 CONFIG_DIR="/etc/openpcc"
 COMPUTE_BOOT_CONFIG="${COMPUTE_BOOT_CONFIG:-${CONFIG_DIR}/compute_boot.yaml}"
 ROUTER_COM_CONFIG="${ROUTER_COM_CONFIG:-${CONFIG_DIR}/router_com.yaml}"
+COMPUTE_BOOT_BIN="${COMPUTE_BOOT_BIN:-/opt/confidentcompute/bin/compute_boot}"
+ROUTER_COM_BIN="${ROUTER_COM_BIN:-/opt/confidentcompute/bin/router_com}"
 
 if [[ "${SKIP_COMPUTE_BOOT:-false}" != "true" ]]; then
-  /opt/confidentcompute/bin/compute_boot -config "${COMPUTE_BOOT_CONFIG}" &
+  "${COMPUTE_BOOT_BIN}" -config "${COMPUTE_BOOT_CONFIG}" &
 fi
 
-exec /opt/confidentcompute/bin/router_com -config "${ROUTER_COM_CONFIG}"
+exec "${ROUTER_COM_BIN}" -config "${ROUTER_COM_CONFIG}"

@@ -8,10 +8,13 @@
 # - Use CREDITHOLE_CONFIG to point to a custom YAML config for credithole.
 set -euo pipefail
 
+MEM_CREDITHOLE_BIN="${MEM_CREDITHOLE_BIN:-/usr/local/bin/mem-credithole}"
+MEM_ROUTER_BIN="${MEM_ROUTER_BIN:-/usr/local/bin/mem-router}"
+
 if [[ -n "${CREDITHOLE_CONFIG:-}" ]]; then
-  /usr/local/bin/mem-credithole -config "${CREDITHOLE_CONFIG}" &
+  "${MEM_CREDITHOLE_BIN}" -config "${CREDITHOLE_CONFIG}" &
 else
-  /usr/local/bin/mem-credithole &
+  "${MEM_CREDITHOLE_BIN}" &
 fi
 
-exec /usr/local/bin/mem-router
+exec "${MEM_ROUTER_BIN}"

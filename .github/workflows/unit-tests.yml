@@ -1,0 +1,19 @@
+name: Unit Tests
+
+on:
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Run server-1 unit tests
+        run: python -m unittest discover -s server-1/tests -p "test_*.py"
+      - name: Run server-2 unit tests
+        run: python -m unittest discover -s server-2/tests -p "test_*.py"
