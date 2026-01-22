@@ -1,5 +1,7 @@
 # How Privacy Is Preserved in OpenPCC (Prototype 1)
 
+Korean version: [HOW_PRIVACY_IS_PRESERVED.ko.md](./HOW_PRIVACY_IS_PRESERVED.ko.md)
+
 This document summarizes how client queries and answers are protected in the
 OpenPCC prototype, based on the design notes and configuration in this repo.
 
