@@ -3,3 +3,8 @@ Private Cloud Compute System, Serving NNStreamer Pipelines, LLMs, Agents. Yet An
 NNStreamer pipeline support is planned but not yet implemented in this version.
 
 This is a temporary project name. Suggest a better name!
+
+
+# Purpose
+
+This is a basis for PCC-related research; e.g., context streaming. This is (at least for now) not for actual service deployment.
