@@ -19,8 +19,10 @@
 ## 용어 요약
 
 - REK: Compute enclave에서 생성되는 Request Encryption Key
+  (비대칭키 쌍, 공개키는 증명 번들로 제공되고 개인키는 TPM에 상주)
 - DEK: 클라이언트가 요청/세션 단위로 생성하는 Data Encryption Key
-- HPKE: REK로 DEK를 감싸는(암호화하는) 공개키 기반 암호 방식
+  (대칭키, 요청 페이로드 암호화에 사용)
+- HPKE: REK 공개키로 DEK를 감싸는(암호화하는) 공개키 기반 암호 방식
 - BHTTP: 요청 페이로드 인코딩에 사용하는 Binary HTTP
 - Attestation: compute node 신뢰성 검증 절차
 - TPM: 증명과 키 관리를 위한 보안 모듈
@@ -29,13 +31,16 @@
 ## 프라이버시 보존의 핵심 흐름
 
 1) 클라이언트는 Router로부터 ComputeNode의 증명 번들(TPM quote, PCR)을 수신한다.
+   (증명 번들에는 REK 공개키가 포함되며, REK 개인키는 TPM에 유지됨)
 2) 클라이언트는 증명(Attestation)을 검증한다.
 3) 클라이언트가 쿼리를 암호화한다.
-   - DEK 생성
-   - REK로 DEK를 HPKE로 암호화
+   - DEK 생성 (대칭키)
+   - REK 공개키로 DEK를 HPKE 암호화
+     (클라이언트는 공개키로 암호화, Compute는 개인키로 복호화)
    - 프롬프트를 BHTTP로 직렬화하고 DEK로 암호화
 4) Router는 복호화 없이 암호화된 요청을 전달한다.
-5) Compute enclave가 TPM/REK로 DEK를 복호화하고, 프롬프트를 복호화해 추론한다.
+5) Compute enclave가 TPM 내 REK 개인키로 DEK를 복호화하고,
+   프롬프트를 복호화해 추론한다.
 
 응답 보호에 대한 참고:
 - 이 레포 문서에는 응답 암호화 포맷이 명시되어 있지 않습니다.
