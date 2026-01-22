@@ -169,3 +169,5 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 )
+
+replace github.com/google/go-sev-guest => github.com/confidentsecurity/go-sev-guest v0.0.0-20251023021740-e3068f976a01
