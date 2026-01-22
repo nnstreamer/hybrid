@@ -19,7 +19,6 @@ import (
 	"github.com/openpcc/openpcc/anonpay/wallet"
 	authclient "github.com/openpcc/openpcc/auth/client"
 	"github.com/openpcc/openpcc/auth/credentialing"
-	"github.com/openpcc/openpcc/internal/test/anonpaytest"
 	"github.com/openpcc/openpcc/inttest"
 	"github.com/openpcc/openpcc/transparency"
 )
@@ -60,7 +59,11 @@ func (f fakeAuthClient) RemoteConfig() authclient.RemoteConfig {
 }
 
 func (f fakeAuthClient) GetAttestationToken(ctx context.Context) (*anonpay.BlindedCredit, error) {
-	return anonpaytest.MustBlindCredit(ctx, ahttp.AttestationCurrencyValue), nil
+	credit, err := blindCredit(ctx, ahttp.AttestationCurrencyValue)
+	if err != nil {
+		return nil, err
+	}
+	return credit, nil
 }
 
 func (f fakeAuthClient) GetCredit(ctx context.Context, amountNeeded int64) (*anonpay.BlindedCredit, error) {
@@ -68,7 +71,11 @@ func (f fakeAuthClient) GetCredit(ctx context.Context, amountNeeded int64) (*ano
 	if err != nil {
 		return nil, err
 	}
-	return anonpaytest.MustBlindCredit(ctx, val), nil
+	credit, err := blindCredit(ctx, val)
+	if err != nil {
+		return nil, err
+	}
+	return credit, nil
 }
 
 func (f fakeAuthClient) PutCredit(ctx context.Context, _ *anonpay.BlindedCredit) error {
@@ -80,7 +87,11 @@ func (f fakeAuthClient) GetBadge(ctx context.Context) (credentialing.Badge, erro
 }
 
 func (f fakeAuthClient) Payee() *anonpay.Payee {
-	return anonpaytest.MustNewPayee()
+	payee, err := newTestPayee()
+	if err != nil {
+		panic(err)
+	}
+	return payee
 }
 
 type fixedPayment struct {
@@ -98,7 +109,11 @@ func (w *fixedWallet) BeginPayment(ctx context.Context, amount int64) (wallet.Pa
 	if err != nil {
 		return nil, err
 	}
-	return &fixedPayment{credit: anonpaytest.MustBlindCredit(ctx, val)}, nil
+	credit, err := blindCredit(ctx, val)
+	if err != nil {
+		return nil, err
+	}
+	return &fixedPayment{credit: credit}, nil
 }
 
 func (w *fixedWallet) Status() wallet.Status                { return wallet.Status{} }
