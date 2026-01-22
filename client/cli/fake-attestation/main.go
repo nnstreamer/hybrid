@@ -245,13 +245,17 @@ func main() {
 	cfg.TransparencyIdentityPolicy = &policy
 	cfg.TransparencyIdentityPolicySource = openpcc.IdentityPolicySourceConfigured
 
+	nonAnonClient := newProxyHTTPClient()
+	anonClient := newProxyHTTPClient()
+
 	client, err := openpcc.NewFromConfig(
 		context.Background(),
 		cfg,
 		openpcc.WithAuthClient(fakeAuthClient{badge: badge}),
 		openpcc.WithWallet(&fixedWallet{}),
 		openpcc.WithRouterURL(routerURL),
-		openpcc.WithAnonHTTPClient(&http.Client{}),
+		openpcc.WithNonAnonHTTPClient(nonAnonClient),
+		openpcc.WithAnonHTTPClient(anonClient),
 		openpcc.WithFakeAttestationSecret(fakeSecret),
 	)
 	if err != nil {

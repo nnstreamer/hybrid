@@ -375,13 +375,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	nonAnonClient := newProxyHTTPClient()
+	anonClient := newProxyHTTPClient()
+
 	client, err := openpcc.NewFromConfig(
 		context.Background(),
 		cfg,
 		openpcc.WithAuthClient(fakeAuthClient{badge: badge}),
 		openpcc.WithWallet(&fixedWallet{}),
 		openpcc.WithRouterURL(routerURL),
-		openpcc.WithAnonHTTPClient(&http.Client{}),
+		openpcc.WithNonAnonHTTPClient(nonAnonClient),
+		openpcc.WithAnonHTTPClient(anonClient),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize OpenPCC client: %v\n", err)
