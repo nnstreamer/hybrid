@@ -238,7 +238,7 @@ func main() {
 	}
 
 	cfg := openpcc.DefaultConfig()
-	cfg.APIURL = "http://localhost:0000"
+	cfg.APIURL = routerURL
 	cfg.APIKey = "local-test"
 	cfg.PingRouter = false
 	policy := inttest.LocalDevIdentityPolicy()
