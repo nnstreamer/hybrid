@@ -146,13 +146,30 @@ deploy_compute() {
   fi
   local user_data
   user_data="$(mktemp)"
-  cat >"${user_data}" <<EOF
+  user_data_after_reboot="$(mktemp)"
+  cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-set -eux
-export DEBIAN_FRONTEND=noninteractive
-apt-get update
-apt-get install -y docker.io awscli aws-nitro-enclaves-cli curl
+## Do this after the reboot and kernel update.
+# Execute one time only!
+insmod /usr/lib/modules/$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
 systemctl enable --now docker
+usermod -aG docker $(whoami)
+
+git clone https://github.com/nnstreamer/aws-nitro-enclaves-cli.git --depth 1 -b ubuntu-22.04
+
+cd aws-nitro-enclaves-cli
+export NITRO_CLI_INSTALL_DIR=/
+make nitro-cli
+make vsock-proxy
+make NITRO_CLI_INSTALL_DIR=/ install
+source /etc/profile.d/nitro-cli-env.sh
+echo source /etc/profile.d/nitro-cli-env.sh >> ~/.bashrc
+nitro-cli-config -i
+systemctl enable --now nitro-enclaves-allocator
+systemctl start nitro-enclaves-allocator.service
+systemctl enable nitro-enclaves-allocator.service
+cd ..
+
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${compute_image_uri}"
 
@@ -228,7 +245,28 @@ DOCKER_EOF
 fi
 
 nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" ${NITRO_RUN_ARGS}
+
 EOF
+
+script_after_reboot=$(cat ${user_data_after_reboot})
+script_after_reboot_protected=${script_after_reboot//\$/\\\$}
+
+  cat >"${user_data}" <<EOF
+#!/bin/bash
+## Do this before the reboot. This updates the kernel.
+set -eux
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-extra-aws
+
+cat >"/var/lib/cloud/scripts/per-once/initserver.sh" <<INEOF
+${script_after_reboot_protected}
+INEOF
+chmod 755 /var/lib/cloud/scripts/per-once/initserver.sh
+
+reboot now
+EOF
+
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
 
