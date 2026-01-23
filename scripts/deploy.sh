@@ -222,6 +222,8 @@ echo ------/log_24
 echo "Using COMPUTE_HOST=\${COMPUTE_HOST}"
 echo "Using ROUTER_ADDRESS=\${ROUTER_ADDRESS}"
 echo ------/log_25
+export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
 if [[ -n "${COMPUTE_EIF_S3_URI}" ]]; then
   aws s3 cp "${COMPUTE_EIF_S3_URI}" "\${EIF_PATH}"
@@ -261,6 +263,11 @@ CONFIG_EOF
 FROM ${compute_image_uri}
 COPY router_com.yaml /etc/openpcc/router_com.yaml
 DOCKER_EOF
+  echo ---
+  echo CONFIG_DIR \${CONFIG_DIR}
+  echo EIF_PATH \${EIF_PATH}
+  echo docker-uri ${compute_image_uri}-routercfg
+  echo ---
 
   docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
   nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
