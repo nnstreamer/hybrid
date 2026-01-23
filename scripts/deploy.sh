@@ -149,17 +149,23 @@ deploy_compute() {
   user_data_after_reboot="$(mktemp)"
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-## Do this after the reboot and kernel update.
-# Execute one time only!
+touch /log_1
 insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
+touch /log_2
 systemctl enable --now docker
+touch /log_3
 usermod -aG docker \$(whoami)
+touch /log_4
 
 git clone https://github.com/nnstreamer/aws-nitro-enclaves-cli.git --depth 1 -b ubuntu-22.04
+touch /log_5
 
 cd aws-nitro-enclaves-cli
+touch /log_6
 export NITRO_CLI_INSTALL_DIR=/
+touch /log_7
 make nitro-cli
+touch /log_8
 make vsock-proxy
 make NITRO_CLI_INSTALL_DIR=/ install
 source /etc/profile.d/nitro-cli-env.sh
@@ -262,7 +268,7 @@ apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-e
 cat >"/var/lib/cloud/scripts/per-once/initserver.sh" <<INEOF
 ${script_after_reboot_protected}
 INEOF
-chmod 755 /var/lib/cloud/scripts/per-once/initserver.sh
+chmod 744 /var/lib/cloud/scripts/per-once/initserver.sh
 
 reboot now
 EOF
