@@ -252,6 +252,8 @@ fi
 
 nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" ${NITRO_RUN_ARGS}
 
+# This is for once. But per-once is strangely not working.
+mv \$0 /
 EOF
 
 script_after_reboot=$(cat ${user_data_after_reboot})
@@ -265,10 +267,10 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-extra-aws
 
-cat >"/var/lib/cloud/scripts/per-once/initserver.sh" <<INEOF
+cat >"/var/lib/cloud/scripts/per-boot/initserver.sh" <<INEOF
 ${script_after_reboot_protected}
 INEOF
-chmod 744 /var/lib/cloud/scripts/per-once/initserver.sh
+chmod 744 /var/lib/cloud/scripts/per-boot/initserver.sh
 
 reboot now
 EOF
