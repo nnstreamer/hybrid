@@ -277,6 +277,7 @@ EOF
     --enclave-options "Enabled=true" \
     --user-data "file://${user_data}" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=openpcc-compute}]" \
+    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
     "${common_args[@]}"
 
   rm -f "${user_data}"
