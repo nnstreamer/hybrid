@@ -151,7 +151,25 @@ deploy_compute() {
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli aws-nitro-enclaves-cli curl
+apt-get install -y docker.io awscli curl
+if command -v apt-get >/dev/null 2>&1; then
+  if apt-cache show nitro-enclaves-cli >/dev/null 2>&1; then
+    apt-get install -y nitro-enclaves-cli
+  elif apt-cache show aws-nitro-enclaves-cli >/dev/null 2>&1; then
+    apt-get install -y aws-nitro-enclaves-cli
+  else
+    echo "Nitro Enclaves CLI package not found in apt repos." >&2
+    echo "Ensure the AWS Nitro Enclaves repo is configured or bake nitro-cli into the AMI." >&2
+    exit 1
+  fi
+elif command -v yum >/dev/null 2>&1; then
+  yum install -y aws-nitro-enclaves-cli
+elif command -v dnf >/dev/null 2>&1; then
+  dnf install -y aws-nitro-enclaves-cli
+else
+  echo "No supported package manager found to install Nitro Enclaves CLI." >&2
+  exit 1
+fi
 systemctl enable --now docker
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${compute_image_uri}"
