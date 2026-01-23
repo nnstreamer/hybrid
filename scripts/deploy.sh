@@ -149,46 +149,59 @@ deploy_compute() {
   user_data_after_reboot="$(mktemp)"
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-touch /log_1
+echo ------/log_1
 insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
-touch /log_2
+echo ------/log_2
 systemctl enable --now docker
-touch /log_3
+echo ------/log_3
 usermod -aG docker \$(whoami)
-touch /log_4
+echo ------/log_4
 
 git clone https://github.com/nnstreamer/aws-nitro-enclaves-cli.git --depth 1 -b ubuntu-22.04
-touch /log_5
+echo ------/log_5
 
 cd aws-nitro-enclaves-cli
-touch /log_6
+echo ------/log_6
 export NITRO_CLI_INSTALL_DIR=/
-touch /log_7
+echo ------/log_7
 make nitro-cli
-touch /log_8
+echo ------/log_8
 make vsock-proxy
+echo ------/log_9
 make NITRO_CLI_INSTALL_DIR=/ install
+echo ------/log_10
 source /etc/profile.d/nitro-cli-env.sh
+echo ------/log_11
 echo source /etc/profile.d/nitro-cli-env.sh >> ~/.bashrc
+echo ------/log_12
 nitro-cli-config -i
+echo ------/log_13
 systemctl enable --now nitro-enclaves-allocator
+echo ------/log_14
 systemctl start nitro-enclaves-allocator.service
+echo ------/log_15
 systemctl enable nitro-enclaves-allocator.service
+echo ------/log_16
 cd ..
 
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+echo ------/log_17
 docker pull "${compute_image_uri}"
+echo ------/log_18
 
 EIF_PATH="/opt/openpcc/compute.eif"
 mkdir -p "/opt/openpcc"
+echo ------/log_19
 ROUTER_ADDRESS="${ROUTER_ADDRESS}"
 ROUTER_COM_PORT="${ROUTER_COM_PORT:-8081}"
+echo ------/log_20
 
 if [[ -n "${COMPUTE_EIF_S3_URI}" && "${ALLOW_PREBUILT_EIF}" != "true" ]]; then
   echo "COMPUTE_EIF_S3_URI is set but deploy-time router config baking is enabled." >&2
   echo "Set ALLOW_PREBUILT_EIF=true to allow prebuilt EIF." >&2
   exit 1
 fi
+echo ------/log_21
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
@@ -196,15 +209,19 @@ if [[ -n "\${TOKEN}" ]]; then
 else
   COMPUTE_HOST="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 fi
+echo ------/log_22
 if [[ -z "\${COMPUTE_HOST}" ]]; then
   COMPUTE_HOST="\$(hostname -I | awk '{print \$1}' || true)"
 fi
+echo ------/log_23
 if [[ -z "\${COMPUTE_HOST}" ]]; then
   echo "Failed to determine compute host IP." >&2
   exit 1
 fi
+echo ------/log_24
 echo "Using COMPUTE_HOST=\${COMPUTE_HOST}"
 echo "Using ROUTER_ADDRESS=\${ROUTER_ADDRESS}"
+echo ------/log_25
 
 if [[ -n "${COMPUTE_EIF_S3_URI}" ]]; then
   aws s3 cp "${COMPUTE_EIF_S3_URI}" "\${EIF_PATH}"
