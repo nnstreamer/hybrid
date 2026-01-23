@@ -126,11 +126,30 @@ EOF
     exit 1
   fi
 
+  local router_public_ip
+  router_public_ip=$(aws ec2 describe-instances \
+    --region "${AWS_REGION}" \
+    --instance-ids "${router_instance_id}" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' \
+    --output text)
+
+  local router_public_address=""
+  if [[ -n "${router_public_ip}" && "${router_public_ip}" != "None" ]]; then
+    router_public_address="http://${router_public_ip}:3600"
+  else
+    router_public_ip=""
+  fi
+
   if [[ -z "${ROUTER_ADDRESS}" ]]; then
     ROUTER_ADDRESS="http://${router_private_ip}:3600"
   fi
 
-  echo "Router deployed: instance=${router_instance_id} private_ip=${router_private_ip} router_address=${ROUTER_ADDRESS}"
+  if [[ -n "${router_public_address}" ]]; then
+    echo "Router public address: ${router_public_address}"
+  else
+    echo "Router public address unavailable (no public IP assigned)."
+  fi
+  echo "Router deployed: instance=${router_instance_id} private_ip=${router_private_ip} public_ip=${router_public_ip:-none} router_address=${ROUTER_ADDRESS} router_public_address=${router_public_address:-none}"
 }
 
 deploy_compute() {
