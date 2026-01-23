@@ -81,7 +81,8 @@ OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Pr
     2.  **`router-image`**: Go 기반 Router 바이너리 포함.
     3.  **`compute-enclave-image`**: Ubuntu 22.04 기반, 추론 엔진, 모델 파일 및 OpenPCC 보안 서비스 포함 [28, 29].
 *   **Enclave Image File (EIF) 빌드**:
-    *   `nitro-cli build-enclave` 명령을 사용하여 `compute-enclave-image`를 `.eif` 파일로 변환합니다. 이 과정에서 PCR 0, 1, 2 등의 측정값이 생성되며, 이는 나중에 클라이언트가 검증하는 데 사용됩니다 [19, 30].
+    *   Prototype 1에서는 **Router 주소/Compute 호스트 정보가 배포 시점에 확정**되므로, EIF는 **배포 단계에서 생성**하는 흐름(A 방식)을 기본으로 합니다.
+    *   빌드 단계에서는 **compute Docker 이미지까지만 생성**하고, 배포 시점에 `router_com.yaml`에 Router 주소를 고정한 뒤 `nitro-cli build-enclave`로 EIF를 생성합니다.
 
 ---
 
@@ -100,21 +101,21 @@ OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Pr
     *   **Amazon ECR (Elastic Container Registry)**에 이미지를 푸시합니다.
 
 3.  **Enclave Artifact 생성 (Server-2 집중)**:
-    *   EC2 빌더 인스턴스에서 ECR의 이미지를 풀(Pull)하여 **EIF 파일**을 생성합니다.
+    *   **배포 단계에서 Compute 호스트가 EIF를 생성**합니다. 이때 Router의 **내부 주소**와 Compute 호스트의 **내부 주소**를 `router_com.yaml`에 고정하여 **Router 등록이 가능한 EIF**를 만듭니다.
     *   생성된 EIF의 **Enclave ID (PCR 값들)**를 추출하여 Router의 구성 파일이나 별도의 Transparency Log에 등록합니다 [31, 32].
 
 4.  **AWS Infrastructure 배포**:
     *   **Terraform** 또는 AWS CLI를 사용하여 다음을 생성/업데이트합니다:
         *   **Router용 EC2**: 일반 인스턴스.
         *   **ComputeNode용 EC2**: **Enclave-enabled** 인스턴스 유형 (예: c5.2xlarge).
-    *   ComputeNode 호스트 EC2 내에서 EIF를 로드하여 Enclave를 실행합니다.
+    *   ComputeNode 호스트 EC2 내에서 **Router 주소가 고정된 EIF**를 로드하여 Enclave를 실행합니다.
 
 ---
 
 #### **4. 설계의 핵심 원칙 (Prototype 1)**
 
 *   **No Privileged Access**: 배포된 ComputeNode 이미지에는 SSH 데몬이 제거되어야 하며, `cloud-init` 등을 통한 런타임 수정을 금지합니다 [24, 27].
-*   **Immutable Infrastructure**: 모든 설정은 빌드 타임에 확정되며, `dm-verity`를 통해 파일 시스템 변조를 방지합니다 [19, 26, 33].
+*   **Immutable Infrastructure**: ComputeNode는 **배포 시점에 Router 주소를 고정한 EIF**로 실행되며, 런타임 변경(SSH, cloud-init 재설정 등)을 금지합니다. `dm-verity`를 통해 파일 시스템 변조를 방지합니다 [19, 26, 33].
 *   **Compatibility**: `/client`와 `/server-1` 사이의 프로토콜에 **User Badge** 헤더 자리를 미리 확보하여, Prototype 2에서 인증 로직 추가 시 통신 규격을 바꿀 필요가 없게 합니다 [9, 10].
 
 이 설계 명세서는 OpenPCC가 강조하는 **"모든 하드웨어 및 소프트웨어 요소가 클라이언트에 의해 증명 가능해야 한다"**는 원칙을 Prototype 1 수준에서 완벽하게 구현하는 데 초점을 맞추고 있습니다 [3, 34, 35].

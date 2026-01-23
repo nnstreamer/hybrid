@@ -5,6 +5,12 @@
 불가능합니다. 이 문서는 **AWS 내 self-hosted runner**를 준비해
 `runs-on: [self-hosted, nitro-eif]` 잡이 정상 동작하도록 설정하는 방법을 안내합니다.
 
+> **참고(A 방식)**  
+> 배포 단계에서 Router 주소를 고정해 EIF를 생성하는 방식(A 방식)을 사용할 경우,
+> 별도의 self-hosted runner 없이 **Compute 호스트에서 EIF를 생성**합니다.
+> 이 문서는 **사전 빌드 EIF(build_eif)**를 사용할 때에만 필요합니다.
+> 사전 빌드 EIF는 **Router 주소가 이미 고정**되어 있어야 합니다.
+
 ### 대상 워크플로
 - `.github/workflows/deploy.yml` → `build-eif` job
 - `.github/workflows/build-pack.yml` → `build-eif` job

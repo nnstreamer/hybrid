@@ -64,6 +64,10 @@ on:
         type: string
         description: Compute instance type (Nitro Enclaves enabled)
         default: ""
+      router_address:
+        type: string
+        description: Optional router address override (for compute-only deploys)
+        default: ""
       build_eif:
         type: boolean
         description: Build EIF on self-hosted runner and upload to S3
@@ -72,6 +76,10 @@ on:
         type: string
         description: Optional S3 URI for prebuilt EIF
         default: ""
+      allow_prebuilt_eif:
+        type: boolean
+        description: Allow using compute_eif_s3_uri as-is
+        default: false
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
@@ -148,6 +156,7 @@ jobs:
       RESOLVED_COMPUTE_AMI_ID: ${{ inputs.compute_ami_id != '' && inputs.compute_ami_id || vars.OPENPCC_COMPUTE_AMI_ID }}
       RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type != '' && inputs.router_instance_type || vars.OPENPCC_ROUTER_INSTANCE_TYPE || 't3.small' }}
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type != '' && inputs.compute_instance_type || vars.OPENPCC_COMPUTE_INSTANCE_TYPE || 'c5.2xlarge' }}
+      RESOLVED_ROUTER_ADDRESS: ${{ inputs.router_address != '' && inputs.router_address || vars.OPENPCC_ROUTER_ADDRESS }}
       RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.build-eif.outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
@@ -186,7 +195,9 @@ jobs:
           COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
+          ROUTER_ADDRESS: ${{ env.RESOLVED_ROUTER_ADDRESS }}
           COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
+          ALLOW_PREBUILT_EIF: ${{ inputs.allow_prebuilt_eif }}
           ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
           ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
         run: bash scripts/deploy.sh
@@ -229,6 +240,7 @@ jobs:
           update_var OPENPCC_ROUTER_SECURITY_GROUP_ID "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
           update_var OPENPCC_COMPUTE_SECURITY_GROUP_ID "${RESOLVED_COMPUTE_SECURITY_GROUP_ID}"
           update_var OPENPCC_INSTANCE_PROFILE_ARN "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          update_var OPENPCC_ROUTER_ADDRESS "${RESOLVED_ROUTER_ADDRESS}"
           update_var OPENPCC_KEY_NAME "${RESOLVED_KEY_NAME}"
           update_var OPENPCC_AMI_ID "${RESOLVED_AMI_ID}"
           update_var OPENPCC_ROUTER_AMI_ID "${RESOLVED_ROUTER_AMI_ID}"

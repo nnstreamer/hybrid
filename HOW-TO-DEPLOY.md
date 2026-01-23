@@ -134,6 +134,9 @@ EIF 자동화를 하려면 **AWS 내 self-hosted runner**를 별도로 준비해
 
 - [DEPLOY_BUILDER_FOR_EIF.md](./DEPLOY_BUILDER_FOR_EIF.md)
 
+> **A 방식(배포 단계 EIF 생성)**을 기본으로 사용할 경우,
+> build-pack 단계에서 EIF를 만들 필요가 없습니다.
+
 ---
 
 ## 7) 배포 워크플로 실행 (필수)
@@ -154,12 +157,17 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 ### 7-2. 선택 입력값
 
 - `key_name` (EC2 SSH 키, 필요 시)
-- `compute_eif_s3_uri` (S3의 EIF 경로)
-- `build_eif` (EIF를 self-hosted runner에서 자동 생성)
+- `router_address` (Router 주소를 직접 지정할 때 사용)
+- `compute_eif_s3_uri` (S3의 EIF 경로, **사전 빌드 EIF 사용 시에만**)
+- `allow_prebuilt_eif` (`compute_eif_s3_uri`를 그대로 사용할지 여부)
+- `build_eif` (EIF를 self-hosted runner에서 자동 생성, **레거시/특수 상황용**)
 - 인스턴스 타입 변경
 
-> `build_eif=true`인 경우 `compute_eif_s3_uri`는 필수입니다.  
-> `compute_eif_s3_uri`를 비우면 EC2 부팅 시 인스턴스 내부에서 EIF를 생성합니다(개발용).
+> **A 방식(배포 단계 EIF 생성)**에서는 `build_eif=false`, `compute_eif_s3_uri`는 비워두는 것을 권장합니다.  
+> 이 경우 Compute 호스트가 **Router 주소를 고정한 EIF**를 생성하고 Enclave를 실행합니다.
+>
+> `compute_eif_s3_uri`를 사용하려면 **해당 EIF에 Router 주소가 이미 고정**되어 있어야 하며,
+> 이 경우 `allow_prebuilt_eif=true`로 실행합니다.
 
 ### 7-3. 입력값 기억(자동 저장) 기능
 
@@ -174,6 +182,7 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 - `OPENPCC_ROUTER_SECURITY_GROUP_ID`
 - `OPENPCC_COMPUTE_SECURITY_GROUP_ID`
 - `OPENPCC_INSTANCE_PROFILE_ARN`
+- `OPENPCC_ROUTER_ADDRESS`
 - `OPENPCC_KEY_NAME`
 - `OPENPCC_AMI_ID`
 - `OPENPCC_ROUTER_AMI_ID`
