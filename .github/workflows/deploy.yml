@@ -142,7 +142,7 @@ jobs:
 
   deploy:
     needs: [build-eif]
-    if: ${{ needs.build-eif.result == 'success' || needs.build-eif.result == 'skipped' }}
+    if: ${{ needs['build-eif'].result == 'success' || needs['build-eif'].result == 'skipped' }}
     runs-on: ubuntu-latest
     env:
       RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
@@ -157,7 +157,7 @@ jobs:
       RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type != '' && inputs.router_instance_type || vars.OPENPCC_ROUTER_INSTANCE_TYPE || 't3.small' }}
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type != '' && inputs.compute_instance_type || vars.OPENPCC_COMPUTE_INSTANCE_TYPE || 'c5.2xlarge' }}
       RESOLVED_ROUTER_ADDRESS: ${{ inputs.router_address != '' && inputs.router_address || vars.OPENPCC_ROUTER_ADDRESS }}
-      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.build-eif.outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
+      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs['build-eif'].outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
     permissions:
