@@ -473,19 +473,21 @@ mv \$0 /
 reboot now
 EOF
 
-script_after_reboot=$(cat ${user_data_after_reboot})
-script_after_reboot_protected=${script_after_reboot//\$/\\\$}
+script_after_reboot_b64=$(gzip -c "${user_data_after_reboot}" | base64 -w 0)
 
   cat >"${user_data}" <<EOF
 #!/bin/bash
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev
+apt-get install -y docker.io awscli python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip
 
-cat >"/var/lib/cloud/scripts/per-boot/initserver.sh" <<INEOF
-${script_after_reboot_protected}
+cat >"/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" <<'INEOF'
+${script_after_reboot_b64}
 INEOF
+base64 -d "/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" > "/var/lib/cloud/scripts/per-boot/initserver.sh.gz"
+gzip -d "/var/lib/cloud/scripts/per-boot/initserver.sh.gz"
+rm -f "/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64"
 chmod 744 /var/lib/cloud/scripts/per-boot/initserver.sh
 
 reboot now
