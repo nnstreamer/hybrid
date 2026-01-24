@@ -184,7 +184,16 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 > `compute_eif_s3_uri`를 사용하려면 **해당 EIF에 Router 주소가 이미 고정**되어 있어야 하며,
 > 이 경우 `allow_prebuilt_eif=true`로 실행합니다.
 
-### 7-3. 입력값 기억(자동 저장) 기능
+### 7-3. 개발용 TPM 시뮬레이터/프록시 구성
+
+- v0.001 개발 버전은 **TPM Simulator(mssim)** 를 사용합니다.
+- 배포 스크립트는 Compute 호스트에 다음 **systemd 서비스**를 구성합니다:
+  - `openpcc-tpm-sim`: TPM Simulator 실행
+  - `openpcc-vsock-router`, `openpcc-vsock-tpm-*`: Enclave → Router/TPM 접근용 VSOCK 프록시
+  - `openpcc-enclave-health-proxy`: Router → Enclave(8081) 헬스체크 프록시
+- **운영 환경에서는 TPM Simulator를 제거**하고 **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
+
+### 7-4. 입력값 기억(자동 저장) 기능
 
 Deploy 워크플로는 **입력값을 GitHub Actions Variables에 자동 저장**합니다.  
 다음 실행에서는 **입력값을 비워도 저장된 값이 자동으로 사용**됩니다.

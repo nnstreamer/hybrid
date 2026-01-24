@@ -72,6 +72,14 @@ OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Pr
 
 ---
 
+#### **1-1. Prototype 1 한계점 및 전환 계획**
+
+*   **개발용 TPM 시뮬레이터 사용**: v0.001은 Compute Enclave에서 TPM Simulator에 의존하며, 이는 **개발/검증용 임시 구성**입니다.
+*   **Enclave 네트워크 제약 대응**: Enclave는 기본 네트워크가 없으므로, Router/TPM 접근은 **VSOCK 기반 프록시**로 중계합니다.
+*   **정식 서비스 전환**: 운영 환경에서는 **TPM Simulator를 제거**하고, **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
+
+---
+
 #### **2. 빌드 및 패키징 (Step 1)**
 
 이 단계에서는 각 컴포넌트를 컨테이너화하고, 특히 Server-2를 Nitro Enclave용 이미지로 변환합니다.
