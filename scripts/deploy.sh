@@ -165,7 +165,19 @@ deploy_compute() {
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
 echo ------/log_1
-insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
+if lsmod | awk '\$1 == "nitro_enclaves" { found=1 } END { exit !found }'; then
+  echo "INFO: nitro_enclaves.ko already loaded; skipping insmod"
+else
+  if ! insmod_output="\$(insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko 2>&1)"; then
+    if [[ "\${insmod_output}" == *"File exists"* ]] || [[ "\${insmod_output}" == *"already in kernel"* ]]; then
+      echo "INFO: nitro_enclaves.ko already loaded; continuing"
+    else
+      echo "\${insmod_output}" >&2
+      exit 1
+    fi
+  fi
+fi
+echo "nitro_enclaves" > /etc/modules-load.d/nitro_enclaves.conf
 echo ------/log_2
 systemctl enable --now docker
 echo ------/log_3
@@ -362,10 +374,28 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT_EOF
 
+cat > /etc/systemd/system/openpcc-enclave.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC Nitro Enclave
+After=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
+Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
+
+[Service]
+Type=simple
+Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
+systemctl enable openpcc-enclave.service
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
@@ -445,8 +475,6 @@ DOCKER_EOF
   nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
   rm -rf "\${CONFIG_DIR}"
 fi
-
-nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
 
 # This is for once. But per-once is strangely not working.
 mv \$0 /
