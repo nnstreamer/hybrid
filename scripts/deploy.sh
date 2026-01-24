@@ -99,6 +99,16 @@ EOF
 
   mapfile -t common_args < <(make_common_args "${ROUTER_SECURITY_GROUP_ID}")
 
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=openpcc-router" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text)
+  if [ -n "$instance_ids" ]; then
+    aws ec2 terminate-instances --instance-ids $instance_ids
+  fi
+
   local router_instance_id
   router_instance_id=$(aws ec2 run-instances \
     --region "${AWS_REGION}" \
@@ -173,7 +183,9 @@ ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
 MONITOR_APP_B64="${monitor_app_b64}"
 MONITOR_SERVICE_B64="${monitor_service_b64}"
 echo ------/log_1
-insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
+# Load nitro_enclaves module and ensure it loads on boot
+modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
+echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 echo ------/log_2
 systemctl enable --now docker
 echo ------/log_3
@@ -370,10 +382,28 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT_EOF
 
+cat > /etc/systemd/system/openpcc-enclave.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC Nitro Enclave
+After=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
+Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
+
+[Service]
+Type=simple
+Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
+systemctl enable openpcc-enclave.service
 if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
   MONITOR_DIR="/opt/openpcc/compute-monitor"
   mkdir -p "\${MONITOR_DIR}"
@@ -463,10 +493,9 @@ DOCKER_EOF
   rm -rf "\${CONFIG_DIR}"
 fi
 
-nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
-
 # This is for once. But per-once is strangely not working.
 mv \$0 /
+reboot now
 EOF
 
 script_after_reboot=$(cat ${user_data_after_reboot})
@@ -490,6 +519,16 @@ EOF
 
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
+
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=openpcc-compute" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text)
+  if [ -n "$instance_ids" ]; then
+    aws ec2 terminate-instances --instance-ids $instance_ids
+  fi
 
   local compute_instance_id
   compute_instance_id=$(aws ec2 run-instances \
