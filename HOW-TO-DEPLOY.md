@@ -176,6 +176,9 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 - `compute_eif_s3_uri` (S3의 EIF 경로, **사전 빌드 EIF 사용 시에만**)
 - `allow_prebuilt_eif` (`compute_eif_s3_uri`를 그대로 사용할지 여부)
 - `build_eif` (EIF를 self-hosted runner에서 자동 생성, **레거시/특수 상황용**)
+- `enclave_cid` (기본값: 16, VSOCK용 Enclave CID)
+- `tpm_simulator_cmd_port` (기본값: 2321, TPM 시뮬레이터 CMD 포트)
+- `tpm_simulator_platform_port` (기본값: 2322, TPM 시뮬레이터 PLATFORM 포트)
 - 인스턴스 타입 변경
 
 > **A 방식(배포 단계 EIF 생성)**에서는 `build_eif=false`, `compute_eif_s3_uri`는 비워두는 것을 권장합니다.  
@@ -192,6 +195,9 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
   - `openpcc-vsock-router`, `openpcc-vsock-tpm-*`: Enclave → Router/TPM 접근용 VSOCK 프록시
   - `openpcc-enclave-health-proxy`: Router → Enclave(8081) 헬스체크 프록시
 - **운영 환경에서는 TPM Simulator를 제거**하고 **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
+- `enclave_cid`는 **VSOCK 주소 식별자**이며, 호스트가 Enclave로 연결할 때 사용합니다.
+  - 기본값(16)으로 동작하도록 구성되어 있으며, 변경 시 **호스트/Enclave 프록시가 동일 값**을 사용해야 합니다.
+- TPM 시뮬레이터 포트는 기본적으로 **2321/2322**를 사용하며, 배포 스크립트는 platform 포트를 **cmd 포트 + 1**로 보정합니다.
 
 ### 7-4. 입력값 기억(자동 저장) 기능
 
@@ -216,6 +222,9 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 - `OPENPCC_COMPUTE_EIF_S3_URI`
 - `OPENPCC_ENCLAVE_CPU_COUNT`
 - `OPENPCC_ENCLAVE_MEMORY_MIB`
+- `OPENPCC_ENCLAVE_CID`
+- `OPENPCC_TPM_SIMULATOR_CMD_PORT`
+- `OPENPCC_TPM_SIMULATOR_PLATFORM_PORT`
 
 > 이 값들은 **Secrets가 아니라 Variables**에 저장됩니다.  
 > 민감한 값은 저장하지 않는 것을 권장합니다.
