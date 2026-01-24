@@ -390,7 +390,7 @@ router_agent:
     - "model=\${MODEL_1:-llama3.2:1b}"
   node_target_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/"
   node_healthcheck_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/_health"
-  router_base_url: "${ROUTER_PROXY_URL}"
+  router_base_url: "\${ROUTER_PROXY_URL}"
 CONFIG_EOF
 
   cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
