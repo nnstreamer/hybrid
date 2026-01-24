@@ -98,6 +98,16 @@ EOF
 
   mapfile -t common_args < <(make_common_args "${ROUTER_SECURITY_GROUP_ID}")
 
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=openpcc-router" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text)
+  if [ -n "$instance_ids" ]; then
+    aws ec2 terminate-instances --instance-ids $instance_ids
+  fi
+
   local router_instance_id
   router_instance_id=$(aws ec2 run-instances \
     --region "${AWS_REGION}" \
@@ -463,6 +473,16 @@ EOF
 
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
+
+  local instance_ids
+  instance_ids=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=openpcc-compute" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text)
+  if [ -n "$instance_ids" ]; then
+    aws ec2 terminate-instances --instance-ids $instance_ids
+  fi
 
   aws ec2 run-instances \
     --region "${AWS_REGION}" \
