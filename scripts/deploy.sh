@@ -165,15 +165,9 @@ deploy_compute() {
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
 echo ------/log_1
-if ! insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko; then
-  if lsmod | awk '\$1 == "nitro_enclaves" { found=1 } END { exit !found }'; then
-    echo "INFO: nitro_enclaves.ko already loaded; continuing"
-  else
-    echo "ERROR: failed to load nitro_enclaves.ko" >&2
-    exit 1
-  fi
-fi
-echo "nitro_enclaves" > /etc/modules-load.d/nitro_enclaves.conf
+# Load nitro_enclaves module and ensure it loads on boot
+modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
+echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 echo ------/log_2
 systemctl enable --now docker
 echo ------/log_3
