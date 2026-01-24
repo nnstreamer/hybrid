@@ -165,16 +165,12 @@ deploy_compute() {
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
 echo ------/log_1
-if lsmod | awk '\$1 == "nitro_enclaves" { found=1 } END { exit !found }'; then
-  echo "INFO: nitro_enclaves.ko already loaded; skipping insmod"
-else
-  if ! insmod_output="\$(insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko 2>&1)"; then
-    if [[ "\${insmod_output}" == *"File exists"* ]] || [[ "\${insmod_output}" == *"already in kernel"* ]]; then
-      echo "INFO: nitro_enclaves.ko already loaded; continuing"
-    else
-      echo "\${insmod_output}" >&2
-      exit 1
-    fi
+if ! insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko; then
+  if lsmod | awk '\$1 == "nitro_enclaves" { found=1 } END { exit !found }'; then
+    echo "INFO: nitro_enclaves.ko already loaded; continuing"
+  else
+    echo "ERROR: failed to load nitro_enclaves.ko" >&2
+    exit 1
   fi
 fi
 echo "nitro_enclaves" > /etc/modules-load.d/nitro_enclaves.conf
@@ -478,6 +474,7 @@ fi
 
 # This is for once. But per-once is strangely not working.
 mv \$0 /
+reboot now
 EOF
 
 script_after_reboot=$(cat ${user_data_after_reboot})
