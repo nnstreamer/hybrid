@@ -88,6 +88,18 @@ on:
         type: string
         description: Enclave memory (MiB)
         default: ""
+      enclave_cid:
+        type: string
+        description: Enclave CID for VSOCK connections
+        default: "16"
+      tpm_simulator_cmd_port:
+        type: string
+        description: TPM simulator command port
+        default: "2321"
+      tpm_simulator_platform_port:
+        type: string
+        description: TPM simulator platform port (cmd+1)
+        default: "2322"
 
 jobs:
   buildeif:
@@ -163,6 +175,9 @@ jobs:
       RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.buildeif.outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
+      RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
+      RESOLVED_TPM_SIMULATOR_CMD_PORT: ${{ inputs.tpm_simulator_cmd_port != '' && inputs.tpm_simulator_cmd_port || vars.OPENPCC_TPM_SIMULATOR_CMD_PORT || '2321' }}
+      RESOLVED_TPM_SIMULATOR_PLATFORM_PORT: ${{ inputs.tpm_simulator_platform_port != '' && inputs.tpm_simulator_platform_port || vars.OPENPCC_TPM_SIMULATOR_PLATFORM_PORT || '2322' }}
     permissions:
       actions: write
       contents: read
@@ -203,6 +218,9 @@ jobs:
           ALLOW_PREBUILT_EIF: ${{ inputs.allow_prebuilt_eif }}
           ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
           ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
+          ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
+          TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
+          TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
         run: bash scripts/deploy.sh
 
       - name: Persist deploy defaults
@@ -253,3 +271,6 @@ jobs:
           update_var OPENPCC_COMPUTE_EIF_S3_URI "${RESOLVED_COMPUTE_EIF_S3_URI}"
           update_var OPENPCC_ENCLAVE_CPU_COUNT "${RESOLVED_ENCLAVE_CPU_COUNT}"
           update_var OPENPCC_ENCLAVE_MEMORY_MIB "${RESOLVED_ENCLAVE_MEMORY_MIB}"
+          update_var OPENPCC_ENCLAVE_CID "${RESOLVED_ENCLAVE_CID}"
+          update_var OPENPCC_TPM_SIMULATOR_CMD_PORT "${RESOLVED_TPM_SIMULATOR_CMD_PORT}"
+          update_var OPENPCC_TPM_SIMULATOR_PLATFORM_PORT "${RESOLVED_TPM_SIMULATOR_PLATFORM_PORT}"

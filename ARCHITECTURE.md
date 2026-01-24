@@ -76,6 +76,7 @@ OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Pr
 
 *   **개발용 TPM 시뮬레이터 사용**: v0.001은 Compute Enclave에서 TPM Simulator에 의존하며, 이는 **개발/검증용 임시 구성**입니다.
 *   **Enclave 네트워크 제약 대응**: Enclave는 기본 네트워크가 없으므로, Router/TPM 접근은 **VSOCK 기반 프록시**로 중계합니다.
+*   **VSOCK CID 관리**: Enclave는 **CID(주소 식별자)**로 접근하며, 기본값(16)을 사용합니다. 변경 시 호스트/Enclave 프록시 구성이 함께 맞춰져야 합니다.
 *   **정식 서비스 전환**: 운영 환경에서는 **TPM Simulator를 제거**하고, **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
 
 ---
