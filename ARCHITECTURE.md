@@ -122,8 +122,10 @@ flowchart LR
 ```
 
 **서비스 목록 (v0.001)**
-- Compute Host: `openpcc-tpm-sim`, `openpcc-vsock-router`, `openpcc-vsock-tpm-cmd`, `openpcc-vsock-tpm-platform`, `openpcc-enclave-health-proxy`
+- Compute Host: `openpcc-tpm-sim`, `openpcc-vsock-router`, `openpcc-vsock-tpm-cmd`, `openpcc-vsock-tpm-platform`, `openpcc-enclave-health-proxy`, `openpcc-compute-monitor (debug only)`
 - Enclave 내부: `compute_boot`, `router_com`, `compute_worker` (LLM 엔진은 enclave 내부)
+
+`openpcc-compute-monitor`는 디버깅 목적의 호스트 웹 로그 UI이며, 서비스 환경에서는 반드시 제거/비활성화해야 합니다.
 
 ---
 
