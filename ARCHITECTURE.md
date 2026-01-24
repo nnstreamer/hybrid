@@ -81,6 +81,52 @@ OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Pr
 
 ---
 
+#### **1-2. Deployment View (v0.001, VSOCK + 서비스 구성)**
+
+```mermaid
+flowchart LR
+  subgraph RouterEC2["EC2: server-1 (Router)"]
+    R[mem-router :3600]
+  end
+
+  subgraph ComputeHost["EC2: server-2 (Compute Host)"]
+    H1[openpcc-tpm-sim\n(TPM Simulator)]
+    H2[openpcc-vsock-router\n(vsock-proxy)]
+    H3[openpcc-vsock-tpm-cmd\n(vsock-proxy)]
+    H4[openpcc-vsock-tpm-platform\n(vsock-proxy)]
+    H5[openpcc-enclave-health-proxy\n(socat TCP->VSOCK)]
+  end
+
+  subgraph Enclave["Nitro Enclave (CID=16)"]
+    E1[compute_boot]
+    E2[router_com :8081]
+    E3[compute_worker / LLM 엔진]
+    EP1[socat TCP->VSOCK\n(127.0.0.1:3600)]
+    EP2[socat TCP->VSOCK\n(127.0.0.1:2321/2322)]
+    EP3[socat VSOCK->TCP\n(:8081)]
+  end
+
+  R <--> |HTTP 3600| H2
+  H2 <--> |VSOCK:3600| EP1
+  EP1 --> E2
+
+  H1 <--> |TCP 2321/2322| H3
+  H1 <--> |TCP 2321/2322| H4
+  H3 <--> |VSOCK:2321| EP2
+  H4 <--> |VSOCK:2322| EP2
+  EP2 --> E1
+
+  R <-->|HTTP 8081| H5
+  H5 <-->|VSOCK:8081| EP3
+  EP3 --> E2
+```
+
+**서비스 목록 (v0.001)**
+- Compute Host: `openpcc-tpm-sim`, `openpcc-vsock-router`, `openpcc-vsock-tpm-cmd`, `openpcc-vsock-tpm-platform`, `openpcc-enclave-health-proxy`
+- Enclave 내부: `compute_boot`, `router_com`, `compute_worker` (LLM 엔진은 enclave 내부)
+
+---
+
 #### **2. 빌드 및 패키징 (Step 1)**
 
 이 단계에서는 각 컴포넌트를 컨테이너화하고, 특히 Server-2를 Nitro Enclave용 이미지로 변환합니다.
