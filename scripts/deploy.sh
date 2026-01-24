@@ -44,6 +44,7 @@ ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
+ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
 
 require_env() {
   local name="$1"
@@ -149,11 +150,28 @@ deploy_compute() {
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
   fi
+  local monitor_app_b64=""
+  local monitor_service_b64=""
+  if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
+    local monitor_app_path
+    local monitor_service_path
+    monitor_app_path="${ROOT_DIR}/server-2/monitor/app.py"
+    monitor_service_path="${ROOT_DIR}/server-2/monitor/openpcc-compute-monitor.service"
+    if [[ ! -f "${monitor_app_path}" || ! -f "${monitor_service_path}" ]]; then
+      echo "Compute monitor assets not found under server-2/monitor." >&2
+      exit 1
+    fi
+    monitor_app_b64=$(base64 -w 0 "${monitor_app_path}")
+    monitor_service_b64=$(base64 -w 0 "${monitor_service_path}")
+  fi
   local user_data
   user_data="$(mktemp)"
   user_data_after_reboot="$(mktemp)"
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
+ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
+MONITOR_APP_B64="${monitor_app_b64}"
+MONITOR_SERVICE_B64="${monitor_service_b64}"
 echo ------/log_1
 insmod /usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko
 echo ------/log_2
@@ -356,6 +374,15 @@ systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
+if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
+  MONITOR_DIR="/opt/openpcc/compute-monitor"
+  mkdir -p "\${MONITOR_DIR}"
+  printf '%s' "\${MONITOR_APP_B64}" | base64 -d > "\${MONITOR_DIR}/app.py"
+  chmod 755 "\${MONITOR_DIR}/app.py"
+  printf '%s' "\${MONITOR_SERVICE_B64}" | base64 -d > /etc/systemd/system/openpcc-compute-monitor.service
+  systemctl daemon-reload
+  systemctl enable --now openpcc-compute-monitor.service
+fi
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
@@ -451,7 +478,7 @@ script_after_reboot_protected=${script_after_reboot//\$/\\\$}
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev
+apt-get install -y docker.io awscli python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh" <<INEOF
 ${script_after_reboot_protected}
@@ -464,7 +491,8 @@ EOF
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
 
-  aws ec2 run-instances \
+  local compute_instance_id
+  compute_instance_id=$(aws ec2 run-instances \
     --region "${AWS_REGION}" \
     --image-id "${COMPUTE_AMI_ID}" \
     --instance-type "${COMPUTE_INSTANCE_TYPE}" \
@@ -472,9 +500,42 @@ EOF
     --user-data "file://${user_data}" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=openpcc-compute}]" \
     --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
-    "${common_args[@]}"
+    --query 'Instances[0].InstanceId' \
+    --output text \
+    "${common_args[@]}")
 
   rm -f "${user_data}"
+
+  if [[ -z "${compute_instance_id}" || "${compute_instance_id}" == "None" ]]; then
+    echo "Failed to determine compute instance ID." >&2
+    exit 1
+  fi
+
+  echo "Waiting for compute instance ${compute_instance_id} to be running..."
+  aws ec2 wait instance-running --region "${AWS_REGION}" --instance-ids "${compute_instance_id}"
+
+  local compute_public_ip
+  local compute_private_ip
+  compute_public_ip=$(aws ec2 describe-instances \
+    --region "${AWS_REGION}" \
+    --instance-ids "${compute_instance_id}" \
+    --query 'Reservations[0].Instances[0].PublicIpAddress' \
+    --output text)
+  compute_private_ip=$(aws ec2 describe-instances \
+    --region "${AWS_REGION}" \
+    --instance-ids "${compute_instance_id}" \
+    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+    --output text)
+
+  if [[ -z "${compute_public_ip}" || "${compute_public_ip}" == "None" ]]; then
+    compute_public_ip="none"
+  fi
+  if [[ -z "${compute_private_ip}" || "${compute_private_ip}" == "None" ]]; then
+    compute_private_ip="unknown"
+  fi
+
+  echo "Compute deployed: instance=${compute_instance_id} public_ip=${compute_public_ip} private_ip=${compute_private_ip}"
+  echo "COMPUTE_PUBLIC_IP=${compute_public_ip}"
 }
 
 case "${COMPONENT}" in
