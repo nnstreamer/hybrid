@@ -35,6 +35,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \
+    socat \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/confidentcompute/bin /etc/openpcc

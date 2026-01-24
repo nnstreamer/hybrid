@@ -38,6 +38,11 @@ COMPUTE_EIF_S3_URI="${COMPUTE_EIF_S3_URI:-}"
 ALLOW_PREBUILT_EIF="${ALLOW_PREBUILT_EIF:-false}"
 ENCLAVE_CPU_COUNT="${ENCLAVE_CPU_COUNT:-2}"
 ENCLAVE_MEMORY_MIB="${ENCLAVE_MEMORY_MIB:-2048}"
+ENCLAVE_CID="${ENCLAVE_CID:-16}"
+ROUTER_PROXY_HOST="${ROUTER_PROXY_HOST:-127.0.0.1}"
+ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
+TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
+TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 
 require_env() {
@@ -222,6 +227,135 @@ echo ------/log_24
 echo "Using COMPUTE_HOST=\${COMPUTE_HOST}"
 echo "Using ROUTER_ADDRESS=\${ROUTER_ADDRESS}"
 echo ------/log_25
+ROUTER_PROXY_HOST="${ROUTER_PROXY_HOST}"
+ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT}"
+ROUTER_PROXY_URL="http://\${ROUTER_PROXY_HOST}:\${ROUTER_PROXY_PORT}"
+TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT}"
+TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT}"
+ENCLAVE_CID="${ENCLAVE_CID}"
+if [[ "\${TPM_SIMULATOR_PLATFORM_PORT}" -ne "\$((TPM_SIMULATOR_CMD_PORT + 1))" ]]; then
+  TPM_SIMULATOR_PLATFORM_PORT="\$((TPM_SIMULATOR_CMD_PORT + 1))"
+fi
+router_host="\${ROUTER_ADDRESS#http://}"
+router_host="\${router_host#https://}"
+router_host="\${router_host%%/*}"
+router_port="3600"
+if [[ "\${router_host}" == *:* ]]; then
+  router_port="\${router_host##*:}"
+  router_host="\${router_host%%:*}"
+fi
+if [[ -z "\${router_host}" ]]; then
+  echo "Failed to parse router host from \${ROUTER_ADDRESS}" >&2
+  exit 1
+fi
+mkdir -p /etc/nitro_enclaves
+cat > /etc/nitro_enclaves/vsock-proxy.yaml <<PROXY_EOF
+allowlist:
+  - address: "\${router_host}"
+    port: \${router_port}
+  - address: "127.0.0.1"
+    port: \${TPM_SIMULATOR_CMD_PORT}
+  - address: "127.0.0.1"
+    port: \${TPM_SIMULATOR_PLATFORM_PORT}
+PROXY_EOF
+
+TPM_SIM_DIR="/opt/openpcc/ms-tpm-20-ref"
+TPM_SIM_BIN="\${TPM_SIM_DIR}/TPMCmd/Simulator/src/tpm2-simulator"
+if [[ ! -x "\${TPM_SIM_BIN}" ]]; then
+  rm -rf "\${TPM_SIM_DIR}"
+  git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git "\${TPM_SIM_DIR}"
+  (
+    cd "\${TPM_SIM_DIR}/TPMCmd"
+    ./bootstrap
+    ./configure
+    make -j"\$(nproc)"
+  )
+fi
+
+cat > /etc/systemd/system/openpcc-tpm-sim.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC TPM simulator (mssim)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=\${TPM_SIM_BIN} \${TPM_SIMULATOR_CMD_PORT}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+cat > /etc/systemd/system/openpcc-vsock-router.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC vsock proxy to router
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${ROUTER_PROXY_PORT} \${router_host} \${router_port}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+cat > /etc/systemd/system/openpcc-vsock-tpm-cmd.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC vsock proxy to TPM simulator (cmd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIMULATOR_CMD_PORT} 127.0.0.1 \${TPM_SIMULATOR_CMD_PORT}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+cat > /etc/systemd/system/openpcc-vsock-tpm-platform.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC vsock proxy to TPM simulator (platform)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIMULATOR_PLATFORM_PORT} 127.0.0.1 \${TPM_SIMULATOR_PLATFORM_PORT}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+cat > /etc/systemd/system/openpcc-enclave-health-proxy.service <<UNIT_EOF
+[Unit]
+Description=OpenPCC TCP to vsock health proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP-LISTEN:\${ROUTER_COM_PORT},reuseaddr,fork VSOCK-CONNECT:\${ENCLAVE_CID}:\${ROUTER_COM_PORT}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+systemctl daemon-reload
+systemctl enable --now openpcc-tpm-sim.service
+systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
+systemctl enable --now openpcc-enclave-health-proxy.service
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
@@ -243,8 +377,8 @@ router_com:
     device: "\${TPM_DEVICE:-/dev/tpmrm0}"
     simulate: \${SIMULATE_TPM:-true}
     rek_handle: \${REK_HANDLE:-0x81000002}
-    simulator_cmd_address: \${SIMULATOR_CMD_ADDRESS:-}
-    simulator_platform_address: \${SIMULATOR_PLATFORM_ADDRESS:-}
+    simulator_cmd_address: "\${SIMULATOR_CMD_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_CMD_PORT}}"
+    simulator_platform_address: "\${SIMULATOR_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
   worker:
     binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
     llm_base_url: "\${LLM_BASE_URL:-http://localhost:11434}"
@@ -256,12 +390,40 @@ router_agent:
     - "model=\${MODEL_1:-llama3.2:1b}"
   node_target_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/"
   node_healthcheck_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/_health"
-  router_base_url: "${ROUTER_ADDRESS}"
+  router_base_url: "${ROUTER_PROXY_URL}"
+CONFIG_EOF
+
+  cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
+inference_engine:
+  type: \${INFERENCE_ENGINE_TYPE:-ollama}
+  skip: \${INFERENCE_ENGINE_SKIP:-false}
+  models:
+    - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
+  local_dev: \${INFERENCE_ENGINE_LOCAL_DEV:-true}
+  url: "\${INFERENCE_ENGINE_URL:-http://localhost:11434}"
+  systemd_service_name: "\${INFERENCE_ENGINE_SERVICE:-ollama.service}"
+tpm:
+  primary_key_handle: \${TPM_PRIMARY_KEY_HANDLE:-0x81000001}
+  child_key_handle: \${TPM_CHILD_KEY_HANDLE:-0x81000002}
+  rek_creation_ticket_handle: \${TPM_REK_TICKET_HANDLE:-0x01c0000A}
+  rek_creation_hash_handle: \${TPM_REK_HASH_HANDLE:-0x01c0000B}
+  attestation_key_handle: \${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
+  tpm_type: \${TPM_TYPE:-Simulator}
+  simulator_cmd_address: "127.0.0.1:${TPM_SIMULATOR_CMD_PORT}"
+  simulator_platform_address: "127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}"
+attestation:
+  fake_secret: "\${FAKE_ATTESTATION_SECRET:-123456}"
+gpu:
+  required: \${GPU_REQUIRED:-false}
+  attestation_mode: \${GPU_ATTESTATION_MODE:-none}
+transparency:
+  image_sigstore_bundle: "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
 CONFIG_EOF
 
   cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
 FROM ${compute_image_uri}
 COPY router_com.yaml /etc/openpcc/router_com.yaml
+COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
   echo ---
   echo CONFIG_DIR \${CONFIG_DIR}
@@ -274,7 +436,7 @@ DOCKER_EOF
   rm -rf "\${CONFIG_DIR}"
 fi
 
-nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" ${NITRO_RUN_ARGS}
+nitro-cli run-enclave --eif-path "\${EIF_PATH}" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
 
 # This is for once. But per-once is strangely not working.
 mv \$0 /
@@ -289,7 +451,7 @@ script_after_reboot_protected=${script_after_reboot//\$/\\\$}
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-extra-aws
+apt-get install -y docker.io awscli curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh" <<INEOF
 ${script_after_reboot_protected}
