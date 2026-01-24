@@ -114,23 +114,33 @@ EOF
   echo "Waiting for router instance ${router_instance_id} to be running..."
   aws ec2 wait instance-running --region "${AWS_REGION}" --instance-ids "${router_instance_id}"
 
-  local router_private_ip
-  router_private_ip=$(aws ec2 describe-instances \
+  local router_ips
+  router_ips=$(aws ec2 describe-instances \
     --region "${AWS_REGION}" \
     --instance-ids "${router_instance_id}" \
-    --query 'Reservations[0].Instances[0].PrivateIpAddress' \
+    --query 'Reservations[0].Instances[0].[PrivateIpAddress,PublicIpAddress]' \
     --output text)
+
+  local router_private_ip
+  local router_public_ip
+  router_private_ip=$(echo "${router_ips}" | awk '{print $1}')
+  router_public_ip=$(echo "${router_ips}" | awk '{print $2}')
 
   if [[ -z "${router_private_ip}" || "${router_private_ip}" == "None" ]]; then
     echo "Failed to determine router private IP." >&2
     exit 1
   fi
 
+  if [[ -z "${router_public_ip}" || "${router_public_ip}" == "None" ]]; then
+    router_public_ip="none"
+  fi
+
   if [[ -z "${ROUTER_ADDRESS}" ]]; then
     ROUTER_ADDRESS="http://${router_private_ip}:3600"
   fi
 
-  echo "Router deployed: instance=${router_instance_id} private_ip=${router_private_ip} router_address=${ROUTER_ADDRESS}"
+  echo "Router deployed: instance=${router_instance_id} public_ip=${router_public_ip} private_ip=${router_private_ip} router_address=${ROUTER_ADDRESS}"
+  echo "ROUTER_PUBLIC_IP=${router_public_ip}"
 }
 
 deploy_compute() {
