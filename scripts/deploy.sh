@@ -192,61 +192,39 @@ deploy_compute() {
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
 MONITOR_APP_B64="${monitor_app_b64}"
 MONITOR_SERVICE_B64="${monitor_service_b64}"
-echo ------/log_1
-# Load nitro_enclaves module and ensure it loads on boot
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
-echo ------/log_2
 systemctl enable --now docker
-echo ------/log_3
 usermod -aG docker \$(whoami)
-echo ------/log_4
 
 git clone https://github.com/nnstreamer/aws-nitro-enclaves-cli.git --depth 1 -b ubuntu-22.04
-echo ------/log_5
 
 cd aws-nitro-enclaves-cli
-echo ------/log_6
 export NITRO_CLI_INSTALL_DIR=/
-echo ------/log_7
 make nitro-cli
-echo ------/log_8
 make vsock-proxy
-echo ------/log_9
 make NITRO_CLI_INSTALL_DIR=/ install
-echo ------/log_10
 source /etc/profile.d/nitro-cli-env.sh
-echo ------/log_11
 echo source /etc/profile.d/nitro-cli-env.sh >> ~/.bashrc
-echo ------/log_12
 nitro-cli-config -i
-echo ------/log_13
 systemctl enable --now nitro-enclaves-allocator
-echo ------/log_14
 systemctl start nitro-enclaves-allocator.service
-echo ------/log_15
 systemctl enable nitro-enclaves-allocator.service
-echo ------/log_16
 cd ..
 
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
-echo ------/log_17
 docker pull "${compute_image_uri}"
-echo ------/log_18
 
 EIF_PATH="/opt/openpcc/compute.eif"
 mkdir -p "/opt/openpcc"
-echo ------/log_19
-ROUTER_ADDRESS="${ROUTER_ADDRESS}"
-ROUTER_COM_PORT="${ROUTER_COM_PORT:-8081}"
-echo ------/log_20
+R_ADDRESS="${ROUTER_ADDRESS}"
+R_COM_PORT="${ROUTER_COM_PORT:-8081}"
 
 if [[ -n "${COMPUTE_EIF_S3_URI}" && "${ALLOW_PREBUILT_EIF}" != "true" ]]; then
   echo "COMPUTE_EIF_S3_URI is set but deploy-time router config baking is enabled." >&2
   echo "Set ALLOW_PREBUILT_EIF=true to allow prebuilt EIF." >&2
   exit 1
 fi
-echo ------/log_21
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
@@ -254,29 +232,23 @@ if [[ -n "\${TOKEN}" ]]; then
 else
   COMPUTE_HOST="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 fi
-echo ------/log_22
 if [[ -z "\${COMPUTE_HOST}" ]]; then
   COMPUTE_HOST="\$(hostname -I | awk '{print \$1}' || true)"
 fi
-echo ------/log_23
 if [[ -z "\${COMPUTE_HOST}" ]]; then
   echo "Failed to determine compute host IP." >&2
   exit 1
 fi
-echo ------/log_24
-echo "Using COMPUTE_HOST=\${COMPUTE_HOST}"
-echo "Using ROUTER_ADDRESS=\${ROUTER_ADDRESS}"
-echo ------/log_25
-ROUTER_PROXY_HOST="${ROUTER_PROXY_HOST}"
-ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT}"
-ROUTER_PROXY_URL="http://\${ROUTER_PROXY_HOST}:\${ROUTER_PROXY_PORT}"
-TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT}"
-TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT}"
+R_PROXY_HOST="${ROUTER_PROXY_HOST}"
+R_PROXY_PORT="${ROUTER_PROXY_PORT}"
+R_PROXY_URL="http://\${R_PROXY_HOST}:\${R_PROXY_PORT}"
+TPM_SIM_CMD_PORT="${TPM_SIMULATOR_CMD_PORT}"
+TPM_SIM_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT}"
 ENCLAVE_CID="${ENCLAVE_CID}"
-if [[ "\${TPM_SIMULATOR_PLATFORM_PORT}" -ne "\$((TPM_SIMULATOR_CMD_PORT + 1))" ]]; then
-  TPM_SIMULATOR_PLATFORM_PORT="\$((TPM_SIMULATOR_CMD_PORT + 1))"
+if [[ "\${TPM_SIM_PLATFORM_PORT}" -ne "\$((TPM_SIM_CMD_PORT + 1))" ]]; then
+  TPM_SIM_PLATFORM_PORT="\$((TPM_SIM_CMD_PORT + 1))"
 fi
-router_host="\${ROUTER_ADDRESS#http://}"
+router_host="\${R_ADDRESS#http://}"
 router_host="\${router_host#https://}"
 router_host="\${router_host%%/*}"
 router_port="3600"
@@ -285,7 +257,7 @@ if [[ "\${router_host}" == *:* ]]; then
   router_host="\${router_host%%:*}"
 fi
 if [[ -z "\${router_host}" ]]; then
-  echo "Failed to parse router host from \${ROUTER_ADDRESS}" >&2
+  echo "Failed to parse router host from \${R_ADDRESS}" >&2
   exit 1
 fi
 mkdir -p /etc/nitro_enclaves
@@ -294,9 +266,9 @@ allowlist:
   - address: "\${router_host}"
     port: \${router_port}
   - address: "127.0.0.1"
-    port: \${TPM_SIMULATOR_CMD_PORT}
+    port: \${TPM_SIM_CMD_PORT}
   - address: "127.0.0.1"
-    port: \${TPM_SIMULATOR_PLATFORM_PORT}
+    port: \${TPM_SIM_PLATFORM_PORT}
 PROXY_EOF
 
 TPM_SIM_DIR="/opt/openpcc/ms-tpm-20-ref"
@@ -320,7 +292,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=\${TPM_SIM_BIN} \${TPM_SIMULATOR_CMD_PORT}
+ExecStart=\${TPM_SIM_BIN} \${TPM_SIM_CMD_PORT}
 Restart=always
 RestartSec=2
 
@@ -336,7 +308,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${ROUTER_PROXY_PORT} \${router_host} \${router_port}
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${R_PROXY_PORT} \${router_host} \${router_port}
 Restart=always
 RestartSec=2
 
@@ -352,7 +324,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIMULATOR_CMD_PORT} 127.0.0.1 \${TPM_SIMULATOR_CMD_PORT}
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_CMD_PORT} 127.0.0.1 \${TPM_SIM_CMD_PORT}
 Restart=always
 RestartSec=2
 
@@ -368,7 +340,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIMULATOR_PLATFORM_PORT} 127.0.0.1 \${TPM_SIMULATOR_PLATFORM_PORT}
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_PLATFORM_PORT} 127.0.0.1 \${TPM_SIM_PLATFORM_PORT}
 Restart=always
 RestartSec=2
 
@@ -384,7 +356,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/socat TCP-LISTEN:\${ROUTER_COM_PORT},reuseaddr,fork VSOCK-CONNECT:\${ENCLAVE_CID}:\${ROUTER_COM_PORT}
+ExecStart=/usr/bin/socat TCP-LISTEN:\${R_COM_PORT},reuseaddr,fork VSOCK-CONNECT:\${ENCLAVE_CID}:\${R_COM_PORT}
 Restart=always
 RestartSec=2
 
@@ -432,7 +404,7 @@ else
   CONFIG_DIR="\$(mktemp -d)"
   cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
 http:
-  port: "\${ROUTER_COM_PORT}"
+  port: "\${R_COM_PORT}"
 evidence:
   socket: "\${EVIDENCE_SOCKET:-/tmp/router.sock}"
   timeout: \${EVIDENCE_TIMEOUT:-30s}
@@ -444,8 +416,8 @@ router_com:
     device: "\${TPM_DEVICE:-/dev/tpmrm0}"
     simulate: \${SIMULATE_TPM:-true}
     rek_handle: \${REK_HANDLE:-0x81000002}
-    simulator_cmd_address: "\${SIMULATOR_CMD_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_CMD_PORT}}"
-    simulator_platform_address: "\${SIMULATOR_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
+    simulator_cmd_address: "\${SIM_CMD_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_CMD_PORT}}"
+    simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
   worker:
     binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
     llm_base_url: "\${LLM_BASE_URL:-http://localhost:11434}"
@@ -455,9 +427,9 @@ router_agent:
     - llm
     - "engine=\${INFERENCE_ENGINE_TYPE:-ollama}"
     - "model=\${MODEL_1:-llama3.2:1b}"
-  node_target_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/"
-  node_healthcheck_url: "http://\${COMPUTE_HOST}:\${ROUTER_COM_PORT}/_health"
-  router_base_url: "\${ROUTER_PROXY_URL}"
+  node_target_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/"
+  node_healthcheck_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/_health"
+  router_base_url: "\${R_PROXY_URL}"
 CONFIG_EOF
 
   cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
@@ -492,18 +464,11 @@ FROM ${compute_image_uri}
 COPY router_com.yaml /etc/openpcc/router_com.yaml
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
-  echo ---
-  echo CONFIG_DIR \${CONFIG_DIR}
-  echo EIF_PATH \${EIF_PATH}
-  echo docker-uri ${compute_image_uri}-routercfg
-  echo ---
-
   docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
   nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
   rm -rf "\${CONFIG_DIR}"
 fi
 
-# This is for once. But per-once is strangely not working.
 mv \$0 /
 reboot now
 EOF
@@ -513,7 +478,6 @@ script_after_reboot_protected=${script_after_reboot//\$/\\\$}
 
   cat >"${user_data}" <<EOF
 #!/bin/bash
-## Do this before the reboot. This updates the kernel.
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
@@ -539,6 +503,8 @@ EOF
   if [ -n "$instance_ids" ]; then
     aws ec2 terminate-instances --instance-ids $instance_ids
   fi
+
+  ls -l ${user_data}
 
   local compute_instance_id
   compute_instance_id=$(aws ec2 run-instances \
