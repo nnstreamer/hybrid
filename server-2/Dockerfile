@@ -30,16 +30,53 @@ RUN if [ -n "${COMPUTE_BOOT_BUILD_TAGS}" ]; then \
 RUN go build -o /out/router_com ./cmd/router_com
 RUN go build -o /out/compute_worker ./cmd/compute_worker
 
+FROM debian:bookworm-slim AS ollama-assets
+
+ARG OLLAMA_DOWNLOAD_URL="https://ollama.com/download/ollama-linux-amd64"
+ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
+ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN set -eu; \
+  mkdir -p "${OLLAMA_MODELS_DIR}"; \
+  curl -fsSL "${OLLAMA_DOWNLOAD_URL}" -o /usr/local/bin/ollama; \
+  chmod +x /usr/local/bin/ollama; \
+  OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama serve >/tmp/ollama.log 2>&1 & \
+  ollama_pid=$!; \
+  for i in $(seq 1 60); do \
+    if curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then \
+      break; \
+    fi; \
+    sleep 1; \
+  done; \
+  OLLAMA_HOST="127.0.0.1:11434" OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama pull "${OLLAMA_MODEL}"; \
+  kill "${ollama_pid}"; \
+  wait "${ollama_pid}" || true
+
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \
+    curl \
     iproute2 \
     socat \
   && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/confidentcompute/bin /etc/openpcc
+
+ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
+ENV OLLAMA_MODEL="${OLLAMA_MODEL}"
+ENV OLLAMA_MODELS="/opt/ollama/models"
+ENV INFERENCE_ENGINE_MODEL_1="${OLLAMA_MODEL}"
+ENV MODEL_1="${OLLAMA_MODEL}"
+
+COPY --from=ollama-assets /usr/local/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama-assets /opt/ollama /opt/ollama
 
 COPY --from=build /out/compute_boot /opt/confidentcompute/bin/compute_boot
 COPY --from=build /out/router_com /opt/confidentcompute/bin/router_com

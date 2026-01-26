@@ -65,6 +65,15 @@ ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 ROUTER_COM_PORT="${ROUTER_COM_PORT:-8081}"
+OLLAMA_BIN="${OLLAMA_BIN:-/usr/local/bin/ollama}"
+OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
+if [[ "${OLLAMA_HOST}" == http* ]]; then
+  OLLAMA_HOST_URL="${OLLAMA_HOST}"
+else
+  OLLAMA_HOST_URL="http://${OLLAMA_HOST}"
+fi
+OLLAMA_MODELS="${OLLAMA_MODELS:-/opt/ollama/models}"
+OLLAMA_STARTUP_TIMEOUT="${OLLAMA_STARTUP_TIMEOUT:-30}"
 
 start_vsock_proxies() {
   if [[ "${ENABLE_VSOCK_PROXIES}" != "true" ]]; then
@@ -98,11 +107,50 @@ start_vsock_proxies() {
   fi
 }
 
+start_ollama() {
+  if [[ ! -x "${OLLAMA_BIN}" ]]; then
+    log "Ollama binary not found at ${OLLAMA_BIN}; skipping"
+    return 0
+  fi
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl -fsS "${OLLAMA_HOST_URL}/api/tags" >/dev/null 2>&1; then
+      log "Ollama already reachable at ${OLLAMA_HOST_URL}; skipping local start"
+      return 0
+    fi
+  fi
+
+  log "Starting Ollama (${OLLAMA_BIN}) with models at ${OLLAMA_MODELS}"
+  OLLAMA_HOST="${OLLAMA_HOST}" OLLAMA_MODELS="${OLLAMA_MODELS}" \
+    "${OLLAMA_BIN}" serve >/var/log/ollama.log 2>&1 &
+  local ollama_pid=$!
+  log_pid_status "ollama" "${ollama_pid}"
+
+  if command -v curl >/dev/null 2>&1; then
+    local ready="false"
+    for i in $(seq 1 "${OLLAMA_STARTUP_TIMEOUT}"); do
+      if curl -fsS "${OLLAMA_HOST_URL}/api/tags" >/dev/null 2>&1; then
+        ready="true"
+        break
+      fi
+      sleep 1
+    done
+    if [[ "${ready}" == "true" ]]; then
+      log "Ollama ready"
+    else
+      log "Ollama readiness check timed out (${OLLAMA_STARTUP_TIMEOUT}s)"
+    fi
+  else
+    log "curl not found; skipping Ollama readiness check"
+  fi
+}
+
 log "Entrypoint starting"
 log_loopback_status
 ensure_loopback_up
 log_loopback_status
 start_vsock_proxies
+start_ollama
 
 if [[ "${SKIP_COMPUTE_BOOT:-false}" != "true" ]]; then
   log "Starting compute_boot (${COMPUTE_BOOT_BIN}) with config ${COMPUTE_BOOT_CONFIG}"
