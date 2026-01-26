@@ -7,7 +7,7 @@ inference_engine:
   type: ${INFERENCE_ENGINE_TYPE:-ollama}
   skip: ${INFERENCE_ENGINE_SKIP:-false}
   models:
-    - "${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b-q4_0}"
+    - "${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
   local_dev: ${INFERENCE_ENGINE_LOCAL_DEV:-true}
   url: "${INFERENCE_ENGINE_URL:-http://localhost:11434}"
   systemd_service_name: "${INFERENCE_ENGINE_SERVICE:-ollama.service}"

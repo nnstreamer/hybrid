@@ -34,7 +34,7 @@ FROM debian:bookworm-slim AS ollama-assets
 
 ARG OLLAMA_VERSION="v0.15.1"
 ARG OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
-ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
+ARG OLLAMA_MODEL="llama3.2:1b"
 ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -73,7 +73,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /opt/confidentcompute/bin /etc/openpcc
 
 ARG OLLAMA_VERSION="v0.15.1"
-ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
+ARG OLLAMA_MODEL="llama3.2:1b"
 ENV OLLAMA_VERSION="${OLLAMA_VERSION}"
 ENV OLLAMA_MODEL="${OLLAMA_MODEL}"
 ENV OLLAMA_MODELS="/opt/ollama/models"

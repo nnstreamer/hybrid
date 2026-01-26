@@ -409,7 +409,7 @@ evidence:
   socket: "\${EVIDENCE_SOCKET:-/tmp/router.sock}"
   timeout: \${EVIDENCE_TIMEOUT:-30s}
 models:
-  - "\${MODEL_1:-llama3.2:1b-q4_0}"
+  - "\${MODEL_1:-llama3.2:1b}"
 router_com:
   check_compute_boot_exit: \${CHECK_COMPUTE_BOOT_EXIT:-false}
   tpm:
@@ -426,7 +426,7 @@ router_agent:
   tags:
     - llm
     - "engine=\${INFERENCE_ENGINE_TYPE:-ollama}"
-    - "model=\${MODEL_1:-llama3.2:1b-q4_0}"
+    - "model=\${MODEL_1:-llama3.2:1b}"
   node_target_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/"
   node_healthcheck_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/_health"
   router_base_url: "\${R_PROXY_URL}"
@@ -437,7 +437,7 @@ inference_engine:
   type: \${INFERENCE_ENGINE_TYPE:-ollama}
   skip: \${INFERENCE_ENGINE_SKIP:-false}
   models:
-    - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b-q4_0}"
+    - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
   local_dev: \${INFERENCE_ENGINE_LOCAL_DEV:-true}
   url: "\${INFERENCE_ENGINE_URL:-http://localhost:11434}"
   systemd_service_name: "\${INFERENCE_ENGINE_SERVICE:-ollama.service}"

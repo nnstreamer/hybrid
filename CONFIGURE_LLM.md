@@ -43,7 +43,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 `INFERENCE_ENGINE_MODEL_1` 값을 새 모델 이름으로 설정합니다.
 
-예: `llama3.2:1b-q4_0` → `qwen2:1.5b-instruct`【F:server-2/config/compute_boot.yaml†L1-L13】
+예: `llama3.2:1b` → `qwen2:1.5b-instruct`【F:server-2/config/compute_boot.yaml†L1-L13】
 
 ### 2-2. router_com 설정도 동일하게 변경
 
@@ -102,7 +102,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 ## 부록: 기본 설정 한눈에 보기
 
 - 런타임 타입: `ollama`  
-- 모델 기본값: `llama3.2:1b-q4_0`  
+- 모델 기본값: `llama3.2:1b`  
 - 런타임 주소: `http://localhost:11434`  
 
 위 기본값들은 모두 설정 파일에서 확인할 수 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】

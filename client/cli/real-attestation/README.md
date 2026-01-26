@@ -57,7 +57,7 @@ At least one of `oidc_issuer`/`oidc_issuer_regex` **and** one of
 
 ## Optional settings
 ```bash
-export MODEL_NAME="llama3.2:1b-q4_0"
+export MODEL_NAME="llama3.2:1b"
 export PROMPT_TEXT="Hello from Ubuntu"
 
 # Sigstore environment (prod or staging)

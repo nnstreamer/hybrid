@@ -1,7 +1,7 @@
 # Objective: Configure router_com and router_agent for OpenPCC compute node.
 # Usage examples:
 # - Set ROUTER_ADDRESS=http://router:3600 and ROUTER_COM_PORT=8081
-# - Set MODEL_1=llama3.2:1b-q4_0 and LLM_BASE_URL=http://localhost:11434
+# - Set MODEL_1=llama3.2:1b and LLM_BASE_URL=http://localhost:11434
 # - Provide overrides via environment variables (YAML supports ${VAR:-default})
 http:
   port: "${ROUTER_COM_PORT:-8081}"
@@ -9,7 +9,7 @@ evidence:
   socket: "${EVIDENCE_SOCKET:-/tmp/router.sock}"
   timeout: ${EVIDENCE_TIMEOUT:-30s}
 models:
-  - "${MODEL_1:-llama3.2:1b-q4_0}"
+  - "${MODEL_1:-llama3.2:1b}"
 router_com:
   check_compute_boot_exit: ${CHECK_COMPUTE_BOOT_EXIT:-false}
   tpm:
@@ -26,7 +26,7 @@ router_agent:
   tags:
     - llm
     - "engine=${INFERENCE_ENGINE_TYPE:-ollama}"
-    - "model=${MODEL_1:-llama3.2:1b-q4_0}"
+    - "model=${MODEL_1:-llama3.2:1b}"
   node_target_url: "http://${COMPUTE_HOST:-localhost}:${ROUTER_COM_PORT:-8081}/"
   node_healthcheck_url: "http://${COMPUTE_HOST:-localhost}:${ROUTER_COM_PORT:-8081}/_health"
   router_base_url: "${ROUTER_ADDRESS:-http://localhost:3600}"
