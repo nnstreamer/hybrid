@@ -40,6 +40,7 @@ ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    tar \
     zstd \
   && rm -rf /var/lib/apt/lists/*
 
@@ -66,6 +67,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \
     curl \
+    tar \
     iproute2 \
     socat \
   && rm -rf /var/lib/apt/lists/*
