@@ -35,6 +35,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \
+    iproute2 \
     socat \
   && rm -rf /var/lib/apt/lists/*
 
