@@ -36,6 +36,7 @@ ARG OLLAMA_VERSION="v0.15.1"
 ARG OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
 ARG OLLAMA_MODEL="llama3.2:1b"
 ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
+ARG OLLAMA_STRIP_GPU_LIBS="true"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
@@ -49,6 +50,9 @@ RUN set -eu; \
   curl -fsSL "${OLLAMA_DOWNLOAD_URL}" -o /tmp/ollama.tar.zst; \
   tar --zstd -xf /tmp/ollama.tar.zst -C /usr/local; \
   rm -f /tmp/ollama.tar.zst; \
+  if [ "${OLLAMA_STRIP_GPU_LIBS}" = "true" ]; then \
+    rm -rf /usr/local/lib/ollama/cuda_v* /usr/local/lib/ollama/rocm*; \
+  fi; \
   OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama serve >/tmp/ollama.log 2>&1 & \
   ollama_pid=$!; \
   for i in $(seq 1 60); do \
