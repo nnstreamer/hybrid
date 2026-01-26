@@ -21,9 +21,10 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 기본값은 **Ollama**입니다. `compute_boot.yaml`의 `inference_engine.type` 기본값이 `ollama`로 설정되어 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】
 
-### 1-2. 모델은 “이름만” 설정됨
+### 1-2. 모델은 빌드 단계에서 이미지에 포함됨
 
-모델 이름은 설정에만 존재합니다. 실제 모델 파일은 이미지/코드에 포함되어 있지 않습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L27】
+모델 이름은 설정에 존재하며, **compute 이미지 빌드 단계에서 Ollama가 모델을 pull**해 이미지에 포함합니다.  
+소스 코드에는 모델 파일을 직접 포함하지 않습니다.【F:server-2/Dockerfile†L1-L80】【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L27】
 
 ### 1-3. 런타임 주소
 
@@ -42,7 +43,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 `INFERENCE_ENGINE_MODEL_1` 값을 새 모델 이름으로 설정합니다.
 
-예: `llama3.2:1b` → `qwen2:1.5b-instruct`【F:server-2/config/compute_boot.yaml†L1-L13】
+예: `llama3.2:1b-q4_0` → `qwen2:1.5b-instruct`【F:server-2/config/compute_boot.yaml†L1-L13】
 
 ### 2-2. router_com 설정도 동일하게 변경
 
@@ -50,8 +51,10 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 ### 2-3. 모델이 런타임에 실제로 존재해야 함
 
-이 코드셋은 모델을 다운로드하지 않습니다.  
-따라서 **LLM 런타임(Ollama 등)에 모델이 사전 로드되어 있어야** 합니다.【F:server-2/Dockerfile†L1-L41】【F:server-2/config/router_com.yaml†L16-L19】
+이 구성은 **엔클레이브 실행 중에는 모델을 다운로드하지 않습니다.**  
+대신 Docker build 단계에서 Ollama가 모델을 pull해 이미지에 포함해야 합니다.【F:server-2/Dockerfile†L1-L80】
+
+> 모델을 바꾸면 Docker build 단계의 `OLLAMA_MODEL`(또는 동등한 build arg)도 함께 변경해야 합니다.
 
 ---
 
@@ -99,7 +102,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 ## 부록: 기본 설정 한눈에 보기
 
 - 런타임 타입: `ollama`  
-- 모델 기본값: `llama3.2:1b`  
+- 모델 기본값: `llama3.2:1b-q4_0`  
 - 런타임 주소: `http://localhost:11434`  
 
 위 기본값들은 모두 설정 파일에서 확인할 수 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
@@ -109,13 +112,13 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 ## FAQ
 
 **Q1. 현 코드와 Pull request에 LLM serving을 위해 포함된 LLM model이 있는가?**  
-A. 아니요. 모델 파일은 포함되어 있지 않고 모델 이름만 설정에 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L27】
+A. 모델 파일은 소스 코드에 직접 포함되지 않습니다. 대신 compute 이미지 빌드 단계에서 Ollama가 모델을 pull해 이미지에 포함합니다.【F:server-2/Dockerfile†L1-L80】
 
 **Q2. LLM model을 새로 가져오기 위해서는 어떠한 작업을 해주면 되는가?**  
-A. 런타임에 모델을 실제로 준비하고, `INFERENCE_ENGINE_MODEL_1`과 `MODEL_1`을 새 모델 이름으로 맞춘 뒤 `LLM_BASE_URL`이 올바른 런타임을 가리키도록 설정합니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
+A. Docker build 단계에서 새 모델을 pull하도록 `OLLAMA_MODEL`(또는 build arg)을 변경하고, `INFERENCE_ENGINE_MODEL_1`과 `MODEL_1`을 동일한 이름으로 맞춘 뒤 `LLM_BASE_URL`이 올바른 런타임을 가리키도록 설정합니다.【F:server-2/Dockerfile†L1-L80】【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
 
 **Q3. router_com.yaml 에도 모델 이름 정보가 들어가는 이유는?**  
 A. 라우터 등록/태그 기반 라우팅과 워커가 처리 가능한 모델 목록을 설정하기 위해서입니다.【F:server-2/config/router_com.yaml†L6-L27】
 
 **Q4. 사용할 LLM model을 compute node에 넣기 위해 필요한 작업은?**  
-A. 런타임이 모델을 실제로 보유하도록 준비하고(사전 로드), 설정에서 모델 이름과 런타임 주소를 일치시키면 됩니다.【F:server-2/Dockerfile†L1-L41】【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
+A. Docker build 단계에서 모델이 포함되도록 준비하고(사전 pull), 설정에서 모델 이름과 런타임 주소를 일치시키면 됩니다.【F:server-2/Dockerfile†L1-L80】【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】

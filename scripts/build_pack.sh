@@ -53,6 +53,15 @@ build_compute() {
   if [[ -n "${COMPUTE_BOOT_BUILD_TAGS:-}" ]]; then
     build_args+=(--build-arg "COMPUTE_BOOT_BUILD_TAGS=${COMPUTE_BOOT_BUILD_TAGS}")
   fi
+  if [[ -n "${OLLAMA_MODEL:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_MODEL=${OLLAMA_MODEL}")
+  fi
+  if [[ -n "${OLLAMA_DOWNLOAD_URL:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_DOWNLOAD_URL=${OLLAMA_DOWNLOAD_URL}")
+  fi
+  if [[ -n "${OLLAMA_MODELS_DIR:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_MODELS_DIR=${OLLAMA_MODELS_DIR}")
+  fi
   build_image "${COMPUTE_IMAGE_NAME}" "${ROOT_DIR}/server-2/Dockerfile" "${ROOT_DIR}/server-2" "${build_args[@]}"
 
   if [[ "${BUILD_EIF}" == "true" ]]; then

@@ -25,7 +25,7 @@ import (
 const (
 	configPath         = "/etc/nnstreamer/hybrid.ini"
 	defaultRouterURL   = "http://localhost:3600"
-	defaultModel       = "llama3.2:1b"
+	defaultModel       = "llama3.2:1b-q4_0"
 	defaultPrompt      = "Hello from OpenPCC."
 	defaultFakeSecret  = "123456"
 	envRouterURL       = "ROUTER_URL"
