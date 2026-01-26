@@ -27,6 +27,8 @@ build_image() {
   local image_name="$1"
   local dockerfile="$2"
   local context_dir="$3"
+  shift 3
+  local build_args=("$@")
   local image_tag="${image_name}:${IMAGE_TAG}"
 
   if [[ -n "${REGISTRY}" ]]; then
@@ -34,7 +36,7 @@ build_image() {
   fi
 
   echo "Building ${image_tag} from ${dockerfile}"
-  docker build -f "${dockerfile}" -t "${image_tag}" "${context_dir}"
+  docker build -f "${dockerfile}" -t "${image_tag}" "${build_args[@]}" "${context_dir}"
 
   if [[ "${PUSH}" == "true" ]]; then
     echo "Pushing ${image_tag}"
@@ -47,7 +49,11 @@ build_router() {
 }
 
 build_compute() {
-  build_image "${COMPUTE_IMAGE_NAME}" "${ROOT_DIR}/server-2/Dockerfile" "${ROOT_DIR}/server-2"
+  local build_args=()
+  if [[ -n "${COMPUTE_BOOT_BUILD_TAGS:-}" ]]; then
+    build_args+=(--build-arg "COMPUTE_BOOT_BUILD_TAGS=${COMPUTE_BOOT_BUILD_TAGS}")
+  fi
+  build_image "${COMPUTE_IMAGE_NAME}" "${ROOT_DIR}/server-2/Dockerfile" "${ROOT_DIR}/server-2" "${build_args[@]}"
 
   if [[ "${BUILD_EIF}" == "true" ]]; then
     if ! command -v nitro-cli >/dev/null 2>&1; then

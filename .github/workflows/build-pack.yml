@@ -33,6 +33,10 @@ on:
         type: string
         description: Image tag override (defaults to commit SHA)
         default: ""
+      compute_boot_build_tags:
+        type: string
+        description: Optional compute_boot build tags (e.g. include_fake_attestation)
+        default: ""
       aws_region:
         type: string
         description: AWS region for ECR (required when push=true)
@@ -84,6 +88,7 @@ jobs:
           PUSH: ${{ inputs.push }}
           REGISTRY: ${{ inputs.push && steps.login-ecr.outputs.registry || '' }}
           BUILD_EIF: "false"
+          COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.compute_boot_build_tags }}
         run: bash scripts/build_pack.sh
 
   build-eif:
