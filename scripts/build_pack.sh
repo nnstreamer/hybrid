@@ -62,6 +62,9 @@ build_compute() {
   if [[ -n "${OLLAMA_DOWNLOAD_URL:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_DOWNLOAD_URL=${OLLAMA_DOWNLOAD_URL}")
   fi
+  if [[ -n "${OLLAMA_STRIP_GPU_LIBS:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_STRIP_GPU_LIBS=${OLLAMA_STRIP_GPU_LIBS}")
+  fi
   if [[ -n "${OLLAMA_MODELS_DIR:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_MODELS_DIR=${OLLAMA_MODELS_DIR}")
   fi
