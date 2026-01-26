@@ -51,7 +51,7 @@ RUN set -eu; \
   tar --zstd -xf /tmp/ollama.tar.zst -C /usr/local; \
   rm -f /tmp/ollama.tar.zst; \
   if [ "${OLLAMA_STRIP_GPU_LIBS}" = "true" ]; then \
-    rm -rf /usr/local/lib/ollama/cuda_v* /usr/local/lib/ollama/rocm*; \
+    rm -rf /usr/local/lib/ollama/cuda_v* /usr/local/lib/ollama/rocm* /usr/local/lib/ollama/mlx_cuda* /uar/local/lib/ollama/vulkan ; \
   fi; \
   OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama serve >/tmp/ollama.log 2>&1 & \
   ollama_pid=$!; \
