@@ -33,7 +33,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 - `compute_boot.yaml`: `INFERENCE_ENGINE_URL`
 - `router_com.yaml`: `LLM_BASE_URL`
 
-기본값은 `http://localhost:11434`입니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L16-L19】
+기본값은 `http://127.0.0.1:11434`입니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L16-L19】
 
 ---
 
@@ -103,7 +103,7 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 - 런타임 타입: `ollama`  
 - 모델 기본값: `llama3.2:1b`  
-- 런타임 주소: `http://localhost:11434`  
+- 런타임 주소: `http://127.0.0.1:11434`  
 
 위 기본값들은 모두 설정 파일에서 확인할 수 있습니다.【F:server-2/config/compute_boot.yaml†L1-L13】【F:server-2/config/router_com.yaml†L6-L19】
 

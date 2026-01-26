@@ -1,7 +1,7 @@
 # Objective: Configure router_com and router_agent for OpenPCC compute node.
 # Usage examples:
 # - Set ROUTER_ADDRESS=http://router:3600 and ROUTER_COM_PORT=8081
-# - Set MODEL_1=llama3.2:1b and LLM_BASE_URL=http://localhost:11434
+# - Set MODEL_1=llama3.2:1b and LLM_BASE_URL=http://127.0.0.1:11434
 # - Provide overrides via environment variables (YAML supports ${VAR:-default})
 http:
   port: "${ROUTER_COM_PORT:-8081}"
@@ -20,7 +20,7 @@ router_com:
     simulator_platform_address: ${SIMULATOR_PLATFORM_ADDRESS:-}
   worker:
     binary_path: "${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
-    llm_base_url: "${LLM_BASE_URL:-http://localhost:11434}"
+    llm_base_url: "${LLM_BASE_URL:-http://127.0.0.1:11434}"
     badge_public_key: "${BADGE_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQTFKNXJhQTdEZTQ0elFSRVpxU21BbkRMK1RObjFPUUROZW1sWmc4eWc3azg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
 router_agent:
   tags:
