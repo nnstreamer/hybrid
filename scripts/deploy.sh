@@ -420,7 +420,7 @@ router_com:
     simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
   worker:
     binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
-    llm_base_url: "\${LLM_BASE_URL:-http://localhost:11434}"
+    llm_base_url: "\${LLM_BASE_URL:-http://127.0.0.1:11434}"
     badge_public_key: "\${BADGE_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQTFKNXJhQTdEZTQ0elFSRVpxU21BbkRMK1RObjFPUUROZW1sWmc4eWc3azg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
 router_agent:
   tags:
@@ -439,7 +439,7 @@ inference_engine:
   models:
     - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
   local_dev: \${INFERENCE_ENGINE_LOCAL_DEV:-true}
-  url: "\${INFERENCE_ENGINE_URL:-http://localhost:11434}"
+  url: "\${INFERENCE_ENGINE_URL:-http://127.0.0.1:11434}"
   systemd_service_name: "\${INFERENCE_ENGINE_SERVICE:-ollama.service}"
 tpm:
   primary_key_handle: \${TPM_PRIMARY_KEY_HANDLE:-0x81000001}

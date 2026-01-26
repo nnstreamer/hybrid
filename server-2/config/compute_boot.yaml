@@ -1,6 +1,6 @@
 # Objective: Configure compute_boot for OpenPCC compute node initialization.
 # Usage examples:
-# - Set INFERENCE_ENGINE_TYPE=ollama and INFERENCE_ENGINE_URL=http://localhost:11434
+# - Set INFERENCE_ENGINE_TYPE=ollama and INFERENCE_ENGINE_URL=http://127.0.0.1:11434
 # - Set TPM_TYPE=Simulator and FAKE_ATTESTATION_SECRET=123456 for local dev
 # - Provide overrides via environment variables (YAML supports ${VAR:-default})
 inference_engine:
@@ -9,7 +9,7 @@ inference_engine:
   models:
     - "${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
   local_dev: ${INFERENCE_ENGINE_LOCAL_DEV:-true}
-  url: "${INFERENCE_ENGINE_URL:-http://localhost:11434}"
+  url: "${INFERENCE_ENGINE_URL:-http://127.0.0.1:11434}"
   systemd_service_name: "${INFERENCE_ENGINE_SERVICE:-ollama.service}"
 tpm:
   primary_key_handle: ${TPM_PRIMARY_KEY_HANDLE:-0x81000001}

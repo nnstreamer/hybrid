@@ -198,7 +198,7 @@ ${DOCKER} run -d --name openpcc-ollama --network host -e OLLAMA_HOST=0.0.0.0 oll
 
 say "Waiting for Ollama to be ready..."
 for i in $(seq 1 30); do
-  if curl -fsS "http://localhost:11434/api/tags" >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
     break
   fi
   sleep 2
@@ -216,7 +216,7 @@ ${DOCKER} rm -f openpcc-compute >/dev/null 2>&1 || true
 ${DOCKER} run -d --name openpcc-compute --network host \
   -e ROUTER_ADDRESS="http://localhost:3600" \
   -e COMPUTE_HOST="localhost" \
-  -e LLM_BASE_URL="http://localhost:11434" \
+  -e LLM_BASE_URL="http://127.0.0.1:11434" \
   -e MODEL_1="${MODEL_NAME}" \
   -e INFERENCE_ENGINE_MODEL_1="${MODEL_NAME}" \
   -e INFERENCE_ENGINE_TYPE="ollama" \
