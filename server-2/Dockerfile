@@ -32,19 +32,22 @@ RUN go build -o /out/compute_worker ./cmd/compute_worker
 
 FROM debian:bookworm-slim AS ollama-assets
 
-ARG OLLAMA_DOWNLOAD_URL="https://ollama.com/download/ollama-linux-amd64"
+ARG OLLAMA_VERSION="v0.15.1"
+ARG OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
 ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
 ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
+    zstd \
   && rm -rf /var/lib/apt/lists/*
 
 RUN set -eu; \
   mkdir -p "${OLLAMA_MODELS_DIR}"; \
-  curl -fsSL "${OLLAMA_DOWNLOAD_URL}" -o /usr/local/bin/ollama; \
-  chmod +x /usr/local/bin/ollama; \
+  curl -fsSL "${OLLAMA_DOWNLOAD_URL}" -o /tmp/ollama.tar.zst; \
+  tar --zstd -xf /tmp/ollama.tar.zst -C /usr/local; \
+  rm -f /tmp/ollama.tar.zst; \
   OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama serve >/tmp/ollama.log 2>&1 & \
   ollama_pid=$!; \
   for i in $(seq 1 60); do \
@@ -69,13 +72,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN mkdir -p /opt/confidentcompute/bin /etc/openpcc
 
+ARG OLLAMA_VERSION="v0.15.1"
 ARG OLLAMA_MODEL="llama3.2:1b-q4_0"
+ENV OLLAMA_VERSION="${OLLAMA_VERSION}"
 ENV OLLAMA_MODEL="${OLLAMA_MODEL}"
 ENV OLLAMA_MODELS="/opt/ollama/models"
 ENV INFERENCE_ENGINE_MODEL_1="${OLLAMA_MODEL}"
 ENV MODEL_1="${OLLAMA_MODEL}"
 
 COPY --from=ollama-assets /usr/local/bin/ollama /usr/local/bin/ollama
+COPY --from=ollama-assets /usr/local/lib/ollama /usr/local/lib/ollama
 COPY --from=ollama-assets /opt/ollama /opt/ollama
 
 COPY --from=build /out/compute_boot /opt/confidentcompute/bin/compute_boot

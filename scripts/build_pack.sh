@@ -56,6 +56,9 @@ build_compute() {
   if [[ -n "${OLLAMA_MODEL:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_MODEL=${OLLAMA_MODEL}")
   fi
+  if [[ -n "${OLLAMA_VERSION:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_VERSION=${OLLAMA_VERSION}")
+  fi
   if [[ -n "${OLLAMA_DOWNLOAD_URL:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_DOWNLOAD_URL=${OLLAMA_DOWNLOAD_URL}")
   fi
