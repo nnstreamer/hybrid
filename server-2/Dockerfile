@@ -67,6 +67,7 @@ RUN set -eu; \
 
 FROM debian:bookworm-slim
 
+ENV HOME=/root
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     bash \

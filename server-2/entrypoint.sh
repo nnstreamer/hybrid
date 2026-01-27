@@ -145,6 +145,9 @@ start_ollama() {
   fi
 }
 
+export HOME=/root
+mkdir -p "${HOME}"
+
 log "Entrypoint starting"
 log_loopback_status
 ensure_loopback_up
