@@ -44,6 +44,14 @@ ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
+NITRO_LOG_LEVEL="${NITRO_LOG_LEVEL:-info}"
+NITRO_LOG_DIR="${NITRO_LOG_DIR:-/var/log/openpcc}"
+NITRO_BUILD_LOG="${NITRO_BUILD_LOG:-${NITRO_LOG_DIR}/nitro-cli-build.log}"
+NITRO_RUN_LOG="${NITRO_RUN_LOG:-${NITRO_LOG_DIR}/nitro-cli-run.log}"
+NITRO_ENCLAVE_LOG="${NITRO_ENCLAVE_LOG:-${NITRO_LOG_DIR}/enclave-console.log}"
+if [[ -n "${NITRO_ENCLAVE_LOG}" && "${NITRO_RUN_ARGS}" != *"--enclave-log"* ]]; then
+  NITRO_RUN_ARGS="--enclave-log ${NITRO_ENCLAVE_LOG} ${NITRO_RUN_ARGS}"
+fi
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
 
 require_env() {
@@ -192,6 +200,14 @@ deploy_compute() {
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
 MONITOR_APP_B64="${monitor_app_b64}"
 MONITOR_SERVICE_B64="${monitor_service_b64}"
+NITRO_LOG_LEVEL="${NITRO_LOG_LEVEL}"
+NITRO_LOG_DIR="${NITRO_LOG_DIR}"
+NITRO_BUILD_LOG="${NITRO_BUILD_LOG}"
+NITRO_RUN_LOG="${NITRO_RUN_LOG}"
+NITRO_ENCLAVE_LOG="${NITRO_ENCLAVE_LOG}"
+mkdir -p "\${NITRO_LOG_DIR}"
+export RUST_LOG="\${NITRO_LOG_LEVEL}"
+export RUST_BACKTRACE=1
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -373,7 +389,11 @@ Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-route
 [Service]
 Type=simple
 Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+Environment=RUST_LOG=${NITRO_LOG_LEVEL}
+Environment=RUST_BACKTRACE=1
 ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
+StandardOutput=append:${NITRO_RUN_LOG}
+StandardError=append:${NITRO_RUN_LOG}
 Restart=always
 RestartSec=5
 
@@ -465,7 +485,7 @@ COPY router_com.yaml /etc/openpcc/router_com.yaml
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
   docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
-  nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
+  nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}" >> "\${NITRO_BUILD_LOG}" 2>&1
   rm -rf "\${CONFIG_DIR}"
 fi
 
