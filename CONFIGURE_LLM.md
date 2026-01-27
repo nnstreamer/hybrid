@@ -56,6 +56,24 @@ step-by-step으로 설명합니다. 현재 코드/PR에 포함된 설정만 사�
 
 > 모델을 바꾸면 Docker build 단계의 `OLLAMA_MODEL`(또는 동등한 build arg)도 함께 변경해야 합니다.
 
+### 2-4. 컨텍스트 길이(메모리) 줄이기
+
+compute 이미지 빌드 단계에서 **Modelfile 기반으로 컨텍스트 길이를 축소**할 수 있습니다.
+Dockerfile은 `OLLAMA_BASE_MODEL`을 pull한 뒤, `OLLAMA_CONTEXT_SIZE`가 설정되어 있으면
+`OLLAMA_MODEL` 이름으로 모델을 재생성합니다.【F:server-2/Dockerfile†L1-L120】
+
+- `OLLAMA_CONTEXT_SIZE` 기본값: `4096`
+- `OLLAMA_CONTEXT_SIZE=0` 또는 빈 값이면 재생성을 건너뜁니다.
+- 필요하면 `OLLAMA_BASE_MODEL`과 `OLLAMA_MODEL`을 분리해 **베이스 모델과 런타임 모델 이름**을 다르게 가져갈 수 있습니다.
+
+### 2-5. Ollama 런타임 메모리 제한
+
+기본 런타임 제한값은 다음과 같습니다(필요 시 환경변수로 조정).
+
+- `OLLAMA_MAX_LOADED_MODELS=1`
+- `OLLAMA_NUM_PARALLEL=1`
+- `OLLAMA_KEEP_ALIVE=0`【F:server-2/Dockerfile†L80-L130】
+
 ---
 
 ## Step 3) LLM 런타임 교체하기

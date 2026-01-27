@@ -35,6 +35,8 @@ FROM debian:bookworm-slim AS ollama-assets
 ARG OLLAMA_VERSION="v0.15.1"
 ARG OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/${OLLAMA_VERSION}/ollama-linux-amd64.tar.zst"
 ARG OLLAMA_MODEL="llama3.2:1b"
+ARG OLLAMA_BASE_MODEL="llama3.2:1b"
+ARG OLLAMA_CONTEXT_SIZE="4096"
 ARG OLLAMA_MODELS_DIR="/opt/ollama/models"
 ARG OLLAMA_STRIP_GPU_LIBS="true"
 
@@ -51,7 +53,12 @@ RUN set -eu; \
   tar --zstd -xf /tmp/ollama.tar.zst -C /usr/local; \
   rm -f /tmp/ollama.tar.zst; \
   if [ "${OLLAMA_STRIP_GPU_LIBS}" = "true" ]; then \
-    rm -rf /usr/local/lib/ollama/cuda_v* /usr/local/lib/ollama/rocm* /usr/local/lib/ollama/mlx_cuda* /uar/local/lib/ollama/vulkan ; \
+    rm -rf /usr/local/lib/ollama/cuda_v* \
+      /usr/local/lib/ollama/rocm* \
+      /usr/local/lib/ollama/mlx_cuda* \
+      /usr/local/lib/ollama/vulkan* \
+      /usr/local/lib/ollama/metal* \
+      /usr/local/lib/ollama/directml*; \
   fi; \
   OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama serve >/tmp/ollama.log 2>&1 & \
   ollama_pid=$!; \
@@ -61,7 +68,19 @@ RUN set -eu; \
     fi; \
     sleep 1; \
   done; \
-  OLLAMA_HOST="127.0.0.1:11434" OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" /usr/local/bin/ollama pull "${OLLAMA_MODEL}"; \
+  OLLAMA_HOST="127.0.0.1:11434" OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" \
+    /usr/local/bin/ollama pull "${OLLAMA_BASE_MODEL}"; \
+  if [ -n "${OLLAMA_CONTEXT_SIZE}" ] && [ "${OLLAMA_CONTEXT_SIZE}" != "0" ]; then \
+    printf 'FROM %s\nPARAMETER num_ctx %s\n' "${OLLAMA_BASE_MODEL}" "${OLLAMA_CONTEXT_SIZE}" > /tmp/Modelfile; \
+    OLLAMA_HOST="127.0.0.1:11434" OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" \
+      /usr/local/bin/ollama create "${OLLAMA_MODEL}" -f /tmp/Modelfile; \
+    rm -f /tmp/Modelfile; \
+  elif [ "${OLLAMA_MODEL}" != "${OLLAMA_BASE_MODEL}" ]; then \
+    printf 'FROM %s\n' "${OLLAMA_BASE_MODEL}" > /tmp/Modelfile; \
+    OLLAMA_HOST="127.0.0.1:11434" OLLAMA_MODELS="${OLLAMA_MODELS_DIR}" \
+      /usr/local/bin/ollama create "${OLLAMA_MODEL}" -f /tmp/Modelfile; \
+    rm -f /tmp/Modelfile; \
+  fi; \
   kill "${ollama_pid}"; \
   wait "${ollama_pid}" || true
 
@@ -80,9 +99,15 @@ RUN mkdir -p /opt/confidentcompute/bin /etc/openpcc
 
 ARG OLLAMA_VERSION="v0.15.1"
 ARG OLLAMA_MODEL="llama3.2:1b"
+ARG OLLAMA_KEEP_ALIVE="0"
+ARG OLLAMA_MAX_LOADED_MODELS="1"
+ARG OLLAMA_NUM_PARALLEL="1"
 ENV OLLAMA_VERSION="${OLLAMA_VERSION}"
 ENV OLLAMA_MODEL="${OLLAMA_MODEL}"
 ENV OLLAMA_MODELS="/opt/ollama/models"
+ENV OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE}"
+ENV OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS}"
+ENV OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL}"
 ENV INFERENCE_ENGINE_MODEL_1="${OLLAMA_MODEL}"
 ENV MODEL_1="${OLLAMA_MODEL}"
 

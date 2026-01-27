@@ -56,6 +56,12 @@ build_compute() {
   if [[ -n "${OLLAMA_MODEL:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_MODEL=${OLLAMA_MODEL}")
   fi
+  if [[ -n "${OLLAMA_BASE_MODEL:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_BASE_MODEL=${OLLAMA_BASE_MODEL}")
+  fi
+  if [[ -n "${OLLAMA_CONTEXT_SIZE:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_CONTEXT_SIZE=${OLLAMA_CONTEXT_SIZE}")
+  fi
   if [[ -n "${OLLAMA_VERSION:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_VERSION=${OLLAMA_VERSION}")
   fi
@@ -67,6 +73,15 @@ build_compute() {
   fi
   if [[ -n "${OLLAMA_MODELS_DIR:-}" ]]; then
     build_args+=(--build-arg "OLLAMA_MODELS_DIR=${OLLAMA_MODELS_DIR}")
+  fi
+  if [[ -n "${OLLAMA_KEEP_ALIVE:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE}")
+  fi
+  if [[ -n "${OLLAMA_MAX_LOADED_MODELS:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS}")
+  fi
+  if [[ -n "${OLLAMA_NUM_PARALLEL:-}" ]]; then
+    build_args+=(--build-arg "OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL}")
   fi
   build_image "${COMPUTE_IMAGE_NAME}" "${ROOT_DIR}/server-2/Dockerfile" "${ROOT_DIR}/server-2" "${build_args[@]}"
 
