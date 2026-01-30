@@ -1,0 +1,400 @@
+# Objective: One-shot build/pack/deploy workflow for OpenPCC v0.002.
+# - Stage A: build/pack/deploy server-1 + server-3, then capture server-1 address.
+# - Stage B: build/pack/deploy server-2 + server-4 using server-1 address.
+# - Image tag is derived from the commit SHA.
+# - Compute EIF is built during server-2 deploy (no S3 input needed).
+name: OpenPCC v0.002 One-shot Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        type: string
+        description: AWS region
+        default: ""
+      subnet_id:
+        type: string
+        description: Subnet ID for instances
+        default: ""
+      router_security_group_id:
+        type: string
+        description: Security group ID for server-1 (router/gateway)
+        default: ""
+      compute_security_group_id:
+        type: string
+        description: Security group ID for server-2 (compute)
+        default: ""
+      auth_security_group_id:
+        type: string
+        description: Security group ID for server-3 (auth)
+        default: ""
+      relay_security_group_id:
+        type: string
+        description: Security group ID for server-4 (relay)
+        default: ""
+      instance_profile_arn:
+        type: string
+        description: IAM instance profile ARN for EC2
+        default: ""
+      key_name:
+        type: string
+        description: Optional EC2 key pair name
+        default: ""
+      ami_id:
+        type: string
+        description: Base AMI ID (Ubuntu 22.04 recommended)
+        default: ""
+      router_ami_id:
+        type: string
+        description: server-1 AMI ID override
+        default: ""
+      compute_ami_id:
+        type: string
+        description: server-2 AMI ID override
+        default: ""
+      auth_ami_id:
+        type: string
+        description: server-3 AMI ID override
+        default: ""
+      relay_ami_id:
+        type: string
+        description: server-4 AMI ID override
+        default: ""
+      router_instance_type:
+        type: string
+        description: server-1 instance type
+        default: "t3.small"
+      compute_instance_type:
+        type: string
+        description: server-2 instance type (Nitro Enclaves enabled)
+        default: "c6a.4xlarge"
+      auth_instance_type:
+        type: string
+        description: server-3 instance type
+        default: "t3.small"
+      relay_instance_type:
+        type: string
+        description: server-4 instance type
+        default: "t3.small"
+      enable_compute_monitor:
+        type: boolean
+        description: Install compute monitor on server-2 (debug only)
+        default: true
+      enclave_cpu_count:
+        type: string
+        description: Enclave CPU count
+        default: ""
+      enclave_memory_mib:
+        type: string
+        description: Enclave memory (MiB)
+        default: ""
+      enclave_cid:
+        type: string
+        description: Enclave CID for VSOCK connections
+        default: "16"
+      tpm_simulator_cmd_port:
+        type: string
+        description: TPM simulator command port
+        default: "2321"
+      tpm_simulator_platform_port:
+        type: string
+        description: TPM simulator platform port (cmd+1)
+        default: "2322"
+      ohttp_seeds_secret_ref:
+        type: string
+        description: Optional oHTTP seed secret reference (shared for server-1/3)
+        default: ""
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+  SERVER3_IMAGE_NAME: ${{ vars.OPENPCC_AUTH_IMAGE_NAME != '' && vars.OPENPCC_AUTH_IMAGE_NAME || 'openpcc-auth' }}
+  SERVER4_IMAGE_NAME: ${{ vars.OPENPCC_RELAY_IMAGE_NAME != '' && vars.OPENPCC_RELAY_IMAGE_NAME || 'openpcc-relay' }}
+
+jobs:
+  stage-a:
+    name: Stage A (server-1 + server-3)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      server1_internal_addr: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
+      server1_gateway_url: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
+    env:
+      RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
+      RESOLVED_SUBNET_ID: ${{ inputs.subnet_id != '' && inputs.subnet_id || vars.OPENPCC_SUBNET_ID }}
+      RESOLVED_ROUTER_SECURITY_GROUP_ID: ${{ inputs.router_security_group_id != '' && inputs.router_security_group_id || vars.OPENPCC_ROUTER_SECURITY_GROUP_ID }}
+      RESOLVED_AUTH_SECURITY_GROUP_ID: ${{ inputs.auth_security_group_id != '' && inputs.auth_security_group_id || vars.OPENPCC_AUTH_SECURITY_GROUP_ID }}
+      RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
+      RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
+      RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
+      RESOLVED_ROUTER_AMI_ID: ${{ inputs.router_ami_id != '' && inputs.router_ami_id || vars.OPENPCC_ROUTER_AMI_ID }}
+      RESOLVED_AUTH_AMI_ID: ${{ inputs.auth_ami_id != '' && inputs.auth_ami_id || vars.OPENPCC_AUTH_AMI_ID }}
+      RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
+      RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
+      RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.RESOLVED_AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Validate stage A inputs
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "Missing required value: ${name}" >&2
+              missing=1
+            fi
+          }
+          require "subnet_id" "${RESOLVED_SUBNET_ID}"
+          require "router_security_group_id" "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
+          require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_ROUTER_AMI_ID}" ]; then
+            echo "Missing required AMI: ami_id or router_ami_id." >&2
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build server-1 image
+        env:
+          COMPONENT: server-1
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          PUSH: "true"
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: bash scripts/build_pack.sh
+
+      - name: Build server-3 image (if present)
+        if: ${{ hashFiles('server-3/Dockerfile') != '' }}
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SERVER3_IMAGE_NAME: ${{ env.SERVER3_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${SERVER3_IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Building ${image} from server-3/Dockerfile"
+          docker build -f server-3/Dockerfile -t "${image}" server-3
+          docker push "${image}"
+
+      - name: Skip server-3 build
+        if: ${{ hashFiles('server-3/Dockerfile') == '' }}
+        run: echo "::warning::server-3 Dockerfile not found; skipping build."
+
+      - name: Deploy server-1
+        env:
+          COMPONENT: server-1
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          ROUTER_SECURITY_GROUP_ID: ${{ env.RESOLVED_ROUTER_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          ROUTER_AMI_ID: ${{ env.RESOLVED_ROUTER_AMI_ID }}
+          ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
+        run: bash scripts/deploy.sh
+
+      - name: Resolve server-1 address
+        id: resolve-server1
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          instance_id=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=openpcc-router" "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].InstanceId | [0]" \
+            --output text)
+          if [ -z "${instance_id}" ] || [ "${instance_id}" = "None" ]; then
+            echo "Failed to find running server-1 instance (tag Name=openpcc-router)." >&2
+            exit 1
+          fi
+          private_ip=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --instance-ids "${instance_id}" \
+            --query "Reservations[0].Instances[0].PrivateIpAddress" \
+            --output text)
+          if [ -z "${private_ip}" ] || [ "${private_ip}" = "None" ]; then
+            echo "Failed to resolve server-1 private IP." >&2
+            exit 1
+          fi
+          # Default router/gateway port is 3600. Adjust if gateway uses another port.
+          gateway_url="http://${private_ip}:3600"
+          echo "server1_internal_addr=${private_ip}" >> "${GITHUB_OUTPUT}"
+          echo "server1_gateway_url=${gateway_url}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy server-3 (if script present)
+        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          AUTH_SECURITY_GROUP_ID: ${{ env.RESOLVED_AUTH_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          AUTH_AMI_ID: ${{ env.RESOLVED_AUTH_AMI_ID }}
+          AUTH_INSTANCE_TYPE: ${{ env.RESOLVED_AUTH_INSTANCE_TYPE }}
+          SERVER1_INTERNAL_ADDR: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
+          SERVER1_GATEWAY_URL: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
+          OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
+        run: bash scripts/deploy_server3.sh
+
+      - name: Skip server-3 deploy
+        if: ${{ hashFiles('scripts/deploy_server3.sh') == '' }}
+        run: echo "::warning::scripts/deploy_server3.sh not found; skipping server-3 deploy."
+
+  stage-b:
+    name: Stage B (server-2 + server-4)
+    needs: stage-a
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
+      RESOLVED_SUBNET_ID: ${{ inputs.subnet_id != '' && inputs.subnet_id || vars.OPENPCC_SUBNET_ID }}
+      RESOLVED_COMPUTE_SECURITY_GROUP_ID: ${{ inputs.compute_security_group_id != '' && inputs.compute_security_group_id || vars.OPENPCC_COMPUTE_SECURITY_GROUP_ID }}
+      RESOLVED_RELAY_SECURITY_GROUP_ID: ${{ inputs.relay_security_group_id != '' && inputs.relay_security_group_id || vars.OPENPCC_RELAY_SECURITY_GROUP_ID }}
+      RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
+      RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
+      RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
+      RESOLVED_COMPUTE_AMI_ID: ${{ inputs.compute_ami_id != '' && inputs.compute_ami_id || vars.OPENPCC_COMPUTE_AMI_ID }}
+      RESOLVED_RELAY_AMI_ID: ${{ inputs.relay_ami_id != '' && inputs.relay_ami_id || vars.OPENPCC_RELAY_AMI_ID }}
+      RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
+      RESOLVED_RELAY_INSTANCE_TYPE: ${{ inputs.relay_instance_type }}
+      RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
+      RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
+      RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
+      RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
+      RESOLVED_TPM_SIMULATOR_CMD_PORT: ${{ inputs.tpm_simulator_cmd_port != '' && inputs.tpm_simulator_cmd_port || vars.OPENPCC_TPM_SIMULATOR_CMD_PORT || '2321' }}
+      RESOLVED_TPM_SIMULATOR_PLATFORM_PORT: ${{ inputs.tpm_simulator_platform_port != '' && inputs.tpm_simulator_platform_port || vars.OPENPCC_TPM_SIMULATOR_PLATFORM_PORT || '2322' }}
+      SERVER1_INTERNAL_ADDR: ${{ needs.stage-a.outputs.server1_internal_addr }}
+      SERVER1_GATEWAY_URL: ${{ needs.stage-a.outputs.server1_gateway_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.RESOLVED_AWS_REGION }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Validate stage B inputs
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "Missing required value: ${name}" >&2
+              missing=1
+            fi
+          }
+          require "subnet_id" "${RESOLVED_SUBNET_ID}"
+          require "compute_security_group_id" "${RESOLVED_COMPUTE_SECURITY_GROUP_ID}"
+          require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          require "server1_internal_addr" "${SERVER1_INTERNAL_ADDR}"
+          require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
+          if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_COMPUTE_AMI_ID}" ]; then
+            echo "Missing required AMI: ami_id or compute_ami_id." >&2
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Build server-2 image
+        env:
+          COMPONENT: server-2
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          PUSH: "true"
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: bash scripts/build_pack.sh
+
+      - name: Build server-4 image (if present)
+        if: ${{ hashFiles('server-4/Dockerfile') != '' }}
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SERVER4_IMAGE_NAME: ${{ env.SERVER4_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${SERVER4_IMAGE_NAME}:${IMAGE_TAG}"
+          echo "Building ${image} from server-4/Dockerfile"
+          docker build -f server-4/Dockerfile -t "${image}" server-4
+          docker push "${image}"
+
+      - name: Skip server-4 build
+        if: ${{ hashFiles('server-4/Dockerfile') == '' }}
+        run: echo "::warning::server-4 Dockerfile not found; skipping build."
+
+      - name: Deploy server-2
+        env:
+          COMPONENT: server-2
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
+          COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
+          ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
+          ROUTER_ADDRESS: ${{ env.SERVER1_GATEWAY_URL }}
+          COMPUTE_EIF_S3_URI: ""
+          ALLOW_PREBUILT_EIF: "false"
+          ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
+          ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
+          ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
+          TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
+          TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
+        run: bash scripts/deploy.sh
+
+      - name: Deploy server-4 (if script present)
+        if: ${{ hashFiles('scripts/deploy_server4.sh') != '' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          RELAY_SECURITY_GROUP_ID: ${{ env.RESOLVED_RELAY_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          RELAY_AMI_ID: ${{ env.RESOLVED_RELAY_AMI_ID }}
+          RELAY_INSTANCE_TYPE: ${{ env.RESOLVED_RELAY_INSTANCE_TYPE }}
+          RELAY_UPSTREAM_GATEWAY_URL: ${{ env.SERVER1_GATEWAY_URL }}
+          SERVER1_INTERNAL_ADDR: ${{ env.SERVER1_INTERNAL_ADDR }}
+        run: bash scripts/deploy_server4.sh
+
+      - name: Skip server-4 deploy
+        if: ${{ hashFiles('scripts/deploy_server4.sh') == '' }}
+        run: echo "::warning::scripts/deploy_server4.sh not found; skipping server-4 deploy."
