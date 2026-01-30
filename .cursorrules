@@ -1,46 +1,33 @@
 # Cursor rules for this repository
 
-## Primary sources of truth
+## Sources of truth
 - /ARCHITECTURE.md
 - OpenPCC whitepaper (github.com/openpcc/openpcc, whitepaper/openpcc.pdf)
 
-### Conflict handling (mandatory)
-- If the user prompt conflicts with ARCHITECTURE.md, STOP and explain the conflict.
-- If the user prompt conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
-- If ARCHITECTURE.md conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
-- In all conflict cases, do NOT pick a winner or ignore a source. Ask the user
-  to confirm how to proceed.
-- If the whitepaper is not accessible, ask the user to provide it before proceeding.
+### Conflicts (mandatory)
+- If any conflict exists among the user prompt, ARCHITECTURE.md, or the
+  whitepaper, STOP, explain it, and ask the user to resolve it.
+- Do not pick a winner or ignore a source.
+- If the whitepaper is not accessible, request it before making decisions.
 
 ## Architectural constraints (from ARCHITECTURE.md)
-- Treat ARCHITECTURE.md as the authoritative source for current components, roles, and flow.
-- Do not hardcode prototype/PoC-stage choices in rules (e.g., EIF timing, TPM
-  simulator usage, default CID, monitor enablement). Follow the current doc.
-- If ARCHITECTURE.md describes multiple options or stages, ask which applies
-  before making assumptions.
-- Preserve any stated separation of build/packaging vs deployment in the
-  current ARCHITECTURE.md; do not merge steps unless explicitly allowed.
+- Treat ARCHITECTURE.md as authoritative for current components, roles, and flow.
+- Do not encode prototype/PoC choices in rules; follow the current doc.
+- If multiple options or stages exist, ask which applies.
+- Preserve any stated separation of build/packaging vs deployment.
 
 ## Change management & assumptions
 - Keep changes minimal and scoped.
-- If a change touches architecture or security properties, update docs and
-  explain rationale.
-- Do not assume missing values (env vars, paths, tags, endpoints). Ask for
-  clarification when required to proceed safely.
-- Do not change default behavior or production defaults without explicitly
-  summarizing impact and getting user confirmation.
-- If docs and implementation disagree, report the mismatch and ask which to
-  follow before changing behavior.
+- For architecture/security changes, update docs and explain rationale.
+- Do not assume missing inputs (env vars, paths, tags, endpoints); ask first.
+- Do not change defaults without summarizing impact and getting confirmation.
+- If docs and implementation disagree, report and ask which to follow.
 
 ## Diagnostics & execution safety
-- Base analysis on actual logs/outputs; label unsupported ideas as hypotheses.
-- When proposing reproduction steps, include command, required environment
-  variables, expected result, and failure point.
-- For issues sensitive to versions (nitro-cli, Docker, OS, kernel), include
-  version checks as part of diagnosis.
-- If a request is ambiguous in scope or could be destructive/irreversible,
-  summarize the impact and ask for clarification on scope before proceeding.
+- Base analysis on logs/outputs; label hypotheses.
+- Repro steps must include command, env vars, expected result, failure point.
+- Check versions when relevant (nitro-cli, Docker, OS, kernel).
+- If scope is ambiguous or destructive/irreversible, summarize impact and ask.
 
 ## External references
-- When relying on the OpenPCC whitepaper for decisions, cite the specific
-  section or assumption briefly.
+- When relying on the whitepaper, cite the section or assumption briefly.
