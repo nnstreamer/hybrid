@@ -1,0 +1,41 @@
+{
+  "version": "0.002",
+  "features": {
+    "ohttp": true,
+    "real_attestation": true
+  },
+  "relay_urls": [
+    "https://relay.example.com/ohttp"
+  ],
+  "gateway_url": "http://10.0.1.23/",
+  "router_url": "http://10.0.1.23:3600/",
+  "ohttp_seeds": [
+    {
+      "key_id": "01",
+      "seed_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+      "active_from": "2026-01-30T00:00:00Z",
+      "active_until": "2026-02-06T00:00:00Z"
+    },
+    {
+      "key_id": "02",
+      "seed_hex": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+      "active_from": "2026-02-06T00:00:00Z",
+      "active_until": "2026-02-13T00:00:00Z"
+    }
+  ],
+  "attestation": {
+    "policy_id": "policy-2026-01-30",
+    "allowed": {
+      "image_hashes": [
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "tpm_rek_hashes": [
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ]
+    },
+    "verifier_hints": {
+      "type": "aws-nitro",
+      "mode": "default"
+    }
+  }
+}

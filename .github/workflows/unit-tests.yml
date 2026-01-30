@@ -17,3 +17,5 @@ jobs:
         run: python -m unittest discover -s server-1/tests -p "test_*.py"
       - name: Run server-2 unit tests
         run: python -m unittest discover -s server-2/tests -p "test_*.py"
+      - name: Run server-3 unit tests
+        run: python -m unittest discover -s server-3/tests -p "test_*.py"
