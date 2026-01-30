@@ -100,6 +100,10 @@ on:
         type: string
         description: TPM simulator platform port (cmd+1)
         default: "2322"
+      gateway_port:
+        type: string
+        description: Gateway port on server-1 (relay upstream)
+        default: "3600"
       ohttp_seeds_secret_ref:
         type: string
         description: Optional oHTTP seed secret reference (shared for server-1/3)
@@ -119,6 +123,7 @@ jobs:
       id-token: write
     outputs:
       server1_internal_addr: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
+      server1_router_url: ${{ steps.resolve-server1.outputs.server1_router_url }}
       server1_gateway_url: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
     env:
       RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
@@ -132,6 +137,7 @@ jobs:
       RESOLVED_AUTH_AMI_ID: ${{ inputs.auth_ami_id != '' && inputs.auth_ami_id || vars.OPENPCC_AUTH_AMI_ID }}
       RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
       RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
+      RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3600' }}
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
     steps:
       - name: Checkout
@@ -163,6 +169,7 @@ jobs:
           require "subnet_id" "${RESOLVED_SUBNET_ID}"
           require "router_security_group_id" "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
           require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          require "gateway_port" "${RESOLVED_GATEWAY_PORT}"
           if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_ROUTER_AMI_ID}" ]; then
             echo "Missing required AMI: ami_id or router_ami_id." >&2
             missing=1
@@ -209,12 +216,15 @@ jobs:
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
           ROUTER_AMI_ID: ${{ env.RESOLVED_ROUTER_AMI_ID }}
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
+          # NOTE: Passed through for future gateway key sync. server-1 does not consume yet.
+          OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
         run: bash scripts/deploy.sh
 
       - name: Resolve server-1 address
         id: resolve-server1
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          GATEWAY_PORT: ${{ env.RESOLVED_GATEWAY_PORT }}
         run: |
           set -euo pipefail
           instance_id=$(aws ec2 describe-instances \
@@ -235,9 +245,11 @@ jobs:
             echo "Failed to resolve server-1 private IP." >&2
             exit 1
           fi
-          # Default router/gateway port is 3600. Adjust if gateway uses another port.
-          gateway_url="http://${private_ip}:3600"
+          # Router port is fixed at 3600. Gateway port is configurable.
+          router_url="http://${private_ip}:3600"
+          gateway_url="http://${private_ip}:${GATEWAY_PORT}"
           echo "server1_internal_addr=${private_ip}" >> "${GITHUB_OUTPUT}"
+          echo "server1_router_url=${router_url}" >> "${GITHUB_OUTPUT}"
           echo "server1_gateway_url=${gateway_url}" >> "${GITHUB_OUTPUT}"
 
       - name: Deploy server-3 (if script present)
@@ -288,6 +300,7 @@ jobs:
       RESOLVED_TPM_SIMULATOR_CMD_PORT: ${{ inputs.tpm_simulator_cmd_port != '' && inputs.tpm_simulator_cmd_port || vars.OPENPCC_TPM_SIMULATOR_CMD_PORT || '2321' }}
       RESOLVED_TPM_SIMULATOR_PLATFORM_PORT: ${{ inputs.tpm_simulator_platform_port != '' && inputs.tpm_simulator_platform_port || vars.OPENPCC_TPM_SIMULATOR_PLATFORM_PORT || '2322' }}
       SERVER1_INTERNAL_ADDR: ${{ needs.stage-a.outputs.server1_internal_addr }}
+      SERVER1_ROUTER_URL: ${{ needs.stage-a.outputs.server1_router_url }}
       SERVER1_GATEWAY_URL: ${{ needs.stage-a.outputs.server1_gateway_url }}
     steps:
       - name: Checkout
@@ -320,6 +333,7 @@ jobs:
           require "compute_security_group_id" "${RESOLVED_COMPUTE_SECURITY_GROUP_ID}"
           require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
           require "server1_internal_addr" "${SERVER1_INTERNAL_ADDR}"
+          require "server1_router_url" "${SERVER1_ROUTER_URL}"
           require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
           if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_COMPUTE_AMI_ID}" ]; then
             echo "Missing required AMI: ami_id or compute_ami_id." >&2
@@ -368,7 +382,7 @@ jobs:
           COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
-          ROUTER_ADDRESS: ${{ env.SERVER1_GATEWAY_URL }}
+          ROUTER_ADDRESS: ${{ env.SERVER1_ROUTER_URL }}
           COMPUTE_EIF_S3_URI: ""
           ALLOW_PREBUILT_EIF: "false"
           ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}

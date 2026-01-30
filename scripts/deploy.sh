@@ -34,6 +34,8 @@ ROUTER_INSTANCE_TYPE="${ROUTER_INSTANCE_TYPE:-t3.small}"
 COMPUTE_INSTANCE_TYPE="${COMPUTE_INSTANCE_TYPE:-c5.2xlarge}"
 
 ROUTER_ADDRESS="${ROUTER_ADDRESS:-}"
+# NOTE: server-1 does not consume this yet; pass-through for future oHTTP key sync.
+OHTTP_SEEDS_SECRET_REF="${OHTTP_SEEDS_SECRET_REF:-}"
 COMPUTE_EIF_S3_URI="${COMPUTE_EIF_S3_URI:-}"
 ALLOW_PREBUILT_EIF="${ALLOW_PREBUILT_EIF:-false}"
 ENCLAVE_CPU_COUNT="${ENCLAVE_CPU_COUNT:-2}"
@@ -94,7 +96,11 @@ apt-get install -y docker.io awscli
 systemctl enable --now docker
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${router_image_uri}"
-docker run -d --restart unless-stopped --name openpcc-router -p 3600:3600 -p 3501:3501 "${router_image_uri}"
+OHTTP_ENV_ARGS=()
+if [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
+  OHTTP_ENV_ARGS=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")
+fi
+docker run -d --restart unless-stopped --name openpcc-router -p 3600:3600 -p 3501:3501 "${OHTTP_ENV_ARGS[@]}" "${router_image_uri}"
 EOF
 
   mapfile -t common_args < <(make_common_args "${ROUTER_SECURITY_GROUP_ID}")
