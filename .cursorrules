@@ -8,7 +8,8 @@
 - If the user prompt conflicts with ARCHITECTURE.md, STOP and explain the conflict.
 - If the user prompt conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
 - If ARCHITECTURE.md conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
-- In all conflict cases, do NOT pick a winner or ignore a source. Ask the user to confirm how to proceed.
+- In all conflict cases, do NOT pick a winner or ignore a source. Ask the user
+  to confirm how to proceed.
 - If the whitepaper is not accessible, ask the user to provide it before proceeding.
 
 ## Architectural constraints (from ARCHITECTURE.md)
@@ -20,7 +21,26 @@
 - Preserve any stated separation of build/packaging vs deployment in the
   current ARCHITECTURE.md; do not merge steps unless explicitly allowed.
 
-## Default behavior for changes
+## Change management & assumptions
 - Keep changes minimal and scoped.
-- If a change touches architecture or security properties, update docs and explain rationale.
-- Preserve the separation of build vs deploy in scripts and workflows.
+- If a change touches architecture or security properties, update docs and
+  explain rationale.
+- Do not assume missing values (env vars, paths, tags, endpoints). Ask for
+  clarification when required to proceed safely.
+- Do not change default behavior or production defaults without explicitly
+  summarizing impact and getting user confirmation.
+- If docs and implementation disagree, report the mismatch and ask which to
+  follow before changing behavior.
+
+## Diagnostics & execution safety
+- Base analysis on actual logs/outputs; label unsupported ideas as hypotheses.
+- When proposing reproduction steps, include command, required environment
+  variables, expected result, and failure point.
+- For issues sensitive to versions (nitro-cli, Docker, OS, kernel), include
+  version checks as part of diagnosis.
+- If a request is ambiguous in scope or could be destructive/irreversible,
+  summarize the impact and ask for clarification on scope before proceeding.
+
+## External references
+- When relying on the OpenPCC whitepaper for decisions, cite the specific
+  section or assumption briefly.
