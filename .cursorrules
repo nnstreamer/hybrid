@@ -12,13 +12,13 @@
 - If the whitepaper is not accessible, ask the user to provide it before proceeding.
 
 ## Architectural constraints (from ARCHITECTURE.md)
-- Components: TAOS-D, server-1 (router), server-2 (compute enclave), client, workflows.
-- Build/packaging and deployment are separated and must not be combined in a single action.
-- EIF is built at deployment time (router address and compute host are known then).
-- Compute enclave runs compute_boot, router_com, compute_worker.
-- Enclave networking uses VSOCK proxies; default CID is 16.
-- Development uses TPM simulator; production should replace with NSM-based attestation.
-- Compute monitor is debug-only and must be disabled in production.
+- Treat ARCHITECTURE.md as the authoritative source for current components, roles, and flow.
+- Do not hardcode prototype/PoC-stage choices in rules (e.g., EIF timing, TPM
+  simulator usage, default CID, monitor enablement). Follow the current doc.
+- If ARCHITECTURE.md describes multiple options or stages, ask which applies
+  before making assumptions.
+- Preserve any stated separation of build/packaging vs deployment in the
+  current ARCHITECTURE.md; do not merge steps unless explicitly allowed.
 
 ## Default behavior for changes
 - Keep changes minimal and scoped.
