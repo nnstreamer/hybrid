@@ -187,6 +187,59 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 > `compute_eif_s3_uri`를 사용하려면 **해당 EIF에 Router 주소가 이미 고정**되어 있어야 하며,
 > 이 경우 `allow_prebuilt_eif=true`로 실행합니다.
 
+### 7-2a. OHTTP seed 설정 가이드 (v0.002 준비)
+
+`one-shot deploy`는 `OHTTP_SEEDS_SECRET_REF`를 `server-1`/`server-3`에 전달하도록 준비되어 있습니다.
+현재 구현은 **이 값을 전달만** 하며, 실제 oHTTP 키 로직 구현 시 **반드시 이 입력을 읽어 사용**해야 합니다.
+
+**입력 방법(둘 중 하나)**
+- 워크플로 입력: `ohttp_seeds_secret_ref`
+- Repository Variable: `OPENPCC_OHTTP_SEEDS_SECRET_REF`
+
+#### A) AWS Secrets Manager 사용
+
+1) seed 데이터 준비(예: `ohttp_seeds.json`)
+```json
+{
+  "OHTTP_KEYS": [
+    {
+      "key_id": 1,
+      "seed_hex": "0123456789abcdef...64hex...",
+      "active_from": "2026-01-30T00:00:00Z",
+      "active_until": "2026-07-30T00:00:00Z"
+    }
+  ]
+}
+```
+
+seed 생성 예시:
+```bash
+openssl rand -hex 32
+```
+
+2) Secrets Manager에 저장
+```bash
+aws secretsmanager create-secret \
+  --name openpcc-ohttp-seeds \
+  --secret-string file://ohttp_seeds.json
+```
+
+3) 출력된 ARN을 `OHTTP_SEEDS_SECRET_REF`로 설정
+- 워크플로 입력 또는 `OPENPCC_OHTTP_SEEDS_SECRET_REF` 변수에 입력
+
+4) 인스턴스 프로파일 권한
+- `secretsmanager:GetSecretValue` 권한을 해당 ARN에 부여
+
+#### B) 다른 비밀 저장소 사용(예: SSM Parameter Store, Vault, S3 등)
+
+1) 위와 동일한 JSON 포맷으로 저장
+2) 참조 문자열을 `OHTTP_SEEDS_SECRET_REF`로 설정  
+   - 예: `ssm:/openpcc/ohttp-seeds`, `vault://secret/openpcc/ohttp`, `s3://bucket/path/ohttp_seeds.json`
+3) 해당 저장소에 접근 가능한 IAM/크레덴셜을 인스턴스에 부여
+
+> 주의: 현재 배포 스크립트는 **참조 문자열을 전달만** 합니다.  
+> 저장소 종류에 맞는 **실제 조회/파싱 로직은 향후 server-1/server-3 구현에서 추가**해야 합니다.
+
 ### 7-3. 개발용 TPM 시뮬레이터/프록시 구성
 
 - v0.001 개발 버전은 **TPM Simulator(mssim)** 를 사용합니다.
