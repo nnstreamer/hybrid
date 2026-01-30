@@ -245,6 +245,10 @@ v0.002 범위(결제/크레딧/BlindBank 제외)에서 client가 oHTTP 요청을
 | `RELAY_UPSTREAM_GATEWAY_URL` | server-4 upstream gateway 주소 | `server-4` build/pack/deploy |
 | `IMAGE_TAG` | 릴리즈 단위 동기화 | 공통 |
 
+PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
+`SERVER1_INTERNAL_ADDR`(private IP)를 사용하도록 허용한다.
+이 가정은 임시이며, 다른 네트워크 구성에서는 별도 주소 입력이 필요하다.
+
 
 ## 용어(Glossary)
 

@@ -227,6 +227,7 @@ jobs:
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
           TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
           TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
+          # NOTE: Gateway(3200) is not launched yet. Add gateway setup here later.
         run: bash scripts/deploy.sh
 
       - name: Persist deploy defaults

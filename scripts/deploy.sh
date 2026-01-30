@@ -96,6 +96,7 @@ apt-get install -y docker.io awscli
 systemctl enable --now docker
 aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${router_image_uri}"
+# NOTE: Gateway (port 3200) is not launched yet. Add gateway setup here later.
 OHTTP_ENV_ARGS=()
 if [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
   OHTTP_ENV_ARGS=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")

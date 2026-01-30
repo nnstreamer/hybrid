@@ -293,6 +293,13 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 > 변수 저장 단계에서 **API 호출이 실패하면 워크플로가 실패**합니다.  
 > 따라서 해당 리포지토리의 **Actions Variables 쓰기 권한**이 필요합니다.
 
+### 7-5. Known Issues (PoC)
+
+- 현재 배포는 **server-1의 private IP를 기준**으로 router/gateway 주소를 구성합니다.
+  - 모든 서버가 **동일 Subnet에 있는 PoC 환경**을 전제로 동작합니다.
+  - 다른 배포 방식(예: 멀티 VPC, 퍼블릭 DNS/ALB, 교차 서브넷)에서는
+    주소 해석 문제가 발생할 수 있습니다.
+
 ---
 
 ## 8) 배포 후 확인
