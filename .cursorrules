@@ -2,7 +2,7 @@
 
 ## Sources of truth
 - /ARCHITECTURE.md
-- OpenPCC whitepaper (github.com/openpcc/openpcc, whitepaper/openpcc.pdf)
+- /external-documents/openpcc.pdf OpenPCC whitepaper downloaded from github.com/openpcc/openpcc, whitepaper/openpcc.pdf
 
 ### Conflicts (mandatory)
 - If any conflict exists among the user prompt, ARCHITECTURE.md, or the
