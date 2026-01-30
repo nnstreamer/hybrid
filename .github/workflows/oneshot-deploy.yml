@@ -252,6 +252,28 @@ jobs:
           echo "server1_router_url=${router_url}" >> "${GITHUB_OUTPUT}"
           echo "server1_gateway_url=${gateway_url}" >> "${GITHUB_OUTPUT}"
 
+      - name: Validate server-3 inputs
+        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "Missing required value: ${name}" >&2
+              missing=1
+            fi
+          }
+          require "auth_security_group_id" "${RESOLVED_AUTH_SECURITY_GROUP_ID}"
+          if [ -z "${RESOLVED_AUTH_AMI_ID}" ] && [ -z "${RESOLVED_AMI_ID}" ]; then
+            echo "Missing required AMI: auth_ami_id or ami_id." >&2
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
+
       - name: Deploy server-3 (if script present)
         if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
         env:
@@ -367,6 +389,28 @@ jobs:
       - name: Skip server-4 build
         if: ${{ hashFiles('server-4/Dockerfile') == '' }}
         run: echo "::warning::server-4 Dockerfile not found; skipping build."
+
+      - name: Validate server-4 inputs
+        if: ${{ hashFiles('scripts/deploy_server4.sh') != '' }}
+        run: |
+          set -euo pipefail
+          missing=0
+          require() {
+            local name="$1"
+            local value="$2"
+            if [ -z "${value}" ]; then
+              echo "Missing required value: ${name}" >&2
+              missing=1
+            fi
+          }
+          require "relay_security_group_id" "${RESOLVED_RELAY_SECURITY_GROUP_ID}"
+          if [ -z "${RESOLVED_RELAY_AMI_ID}" ] && [ -z "${RESOLVED_AMI_ID}" ]; then
+            echo "Missing required AMI: relay_ami_id or ami_id." >&2
+            missing=1
+          fi
+          if [ "${missing}" -ne 0 ]; then
+            exit 1
+          fi
 
       - name: Deploy server-2
         env:
