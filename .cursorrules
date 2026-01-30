@@ -1,0 +1,26 @@
+# Cursor rules for this repository
+
+## Primary sources of truth
+- /ARCHITECTURE.md
+- OpenPCC whitepaper (github.com/openpcc/openpcc, whitepaper/openpcc.pdf)
+
+### Conflict handling (mandatory)
+- If the user prompt conflicts with ARCHITECTURE.md, STOP and explain the conflict.
+- If the user prompt conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
+- If ARCHITECTURE.md conflicts with the OpenPCC whitepaper, STOP and explain the conflict.
+- In all conflict cases, do NOT pick a winner or ignore a source. Ask the user to confirm how to proceed.
+- If the whitepaper is not accessible, ask the user to provide it before proceeding.
+
+## Architectural constraints (from ARCHITECTURE.md)
+- Components: TAOS-D, server-1 (router), server-2 (compute enclave), client, workflows.
+- Build/packaging and deployment are separated and must not be combined in a single action.
+- EIF is built at deployment time (router address and compute host are known then).
+- Compute enclave runs compute_boot, router_com, compute_worker.
+- Enclave networking uses VSOCK proxies; default CID is 16.
+- Development uses TPM simulator; production should replace with NSM-based attestation.
+- Compute monitor is debug-only and must be disabled in production.
+
+## Default behavior for changes
+- Keep changes minimal and scoped.
+- If a change touches architecture or security properties, update docs and explain rationale.
+- Preserve the separation of build vs deploy in scripts and workflows.
