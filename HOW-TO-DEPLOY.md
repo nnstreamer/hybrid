@@ -299,6 +299,10 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
   - 모든 서버가 **동일 Subnet에 있는 PoC 환경**을 전제로 동작합니다.
   - 다른 배포 방식(예: 멀티 VPC, 퍼블릭 DNS/ALB, 교차 서브넷)에서는
     주소 해석 문제가 발생할 수 있습니다.
+- **Prebuilt EIF 사용 시 router 주소 bake-in 문제**
+  - 사전 빌드 EIF는 **router 주소가 이미 고정**되어 있어야 정상 동작합니다.
+  - one-shot deploy처럼 **router IP가 배포 후 결정되는 흐름**에서는
+    prebuilt EIF 사용을 권장하지 않습니다.
 
 ---
 
