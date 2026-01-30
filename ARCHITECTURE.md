@@ -34,6 +34,9 @@ OpenPCC 표준을 기반으로, v0.001 프로토타입 아키텍처를 v0.002로
   - oHTTP 요청을 디캡슐화(outer layer 제거)
   - allow-list된 내부 서비스로만 전달(보안 경계)
   - 디캡슐화 후의 내부 요청은 Router로 전달하는 것을 기본으로 한다
+- v0.002 배치 원칙
+  - Router와 Gateway는 동일 instance 내에서 **서로 독립적인 user process**로 동작한다
+  - upstream(openpcc/openpcc) 구조 변경 없이 각 컴포넌트를 그대로 수용한다
 
 ### `server-2` (Compute Node)
 
