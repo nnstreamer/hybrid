@@ -16,6 +16,7 @@ on:
           - client
           - server-1
           - server-2
+          - server-3
         default: all
       push:
         type: boolean

@@ -22,6 +22,7 @@ EIF_OUTPUT_DIR="${EIF_OUTPUT_DIR:-${ROOT_DIR}/artifacts}"
 ROUTER_IMAGE_NAME="${ROUTER_IMAGE_NAME:-openpcc-router}"
 COMPUTE_IMAGE_NAME="${COMPUTE_IMAGE_NAME:-openpcc-compute}"
 CLIENT_IMAGE_NAME="${CLIENT_IMAGE_NAME:-openpcc-client}"
+AUTH_IMAGE_NAME="${AUTH_IMAGE_NAME:-openpcc-auth}"
 
 build_image() {
   local image_name="$1"
@@ -91,11 +92,16 @@ build_client() {
   build_image "${CLIENT_IMAGE_NAME}" "${ROOT_DIR}/client/Dockerfile" "${ROOT_DIR}/client"
 }
 
+build_auth() {
+  build_image "${AUTH_IMAGE_NAME}" "${ROOT_DIR}/server-3/Dockerfile" "${ROOT_DIR}/server-3"
+}
+
 case "${COMPONENT}" in
   all)
     build_client
     build_router
     build_compute
+    build_auth
     ;;
   client)
     build_client
@@ -106,9 +112,12 @@ case "${COMPONENT}" in
   server-2)
     build_compute
     ;;
+  server-3)
+    build_auth
+    ;;
   *)
     echo "Unknown component: ${COMPONENT}" >&2
-    echo "Valid values: all, client, server-1, server-2" >&2
+    echo "Valid values: all, client, server-1, server-2, server-3" >&2
     exit 1
     ;;
 esac
