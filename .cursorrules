@@ -1,0 +1,33 @@
+# Cursor rules for this repository
+
+## Sources of truth
+- /ARCHITECTURE.md
+- OpenPCC whitepaper (github.com/openpcc/openpcc, whitepaper/openpcc.pdf)
+
+### Conflicts (mandatory)
+- If any conflict exists among the user prompt, ARCHITECTURE.md, or the
+  whitepaper, STOP, explain it, and ask the user to resolve it.
+- Do not pick a winner or ignore a source.
+- If the whitepaper is not accessible, request it before making decisions.
+
+## Architectural constraints (from ARCHITECTURE.md)
+- Treat ARCHITECTURE.md as authoritative for current components, roles, and flow.
+- Do not encode prototype/PoC choices in rules; follow the current doc.
+- If multiple options or stages exist, ask which applies.
+- Preserve any stated separation of build/packaging vs deployment.
+
+## Change management & assumptions
+- Keep changes minimal and scoped.
+- For architecture/security changes, update docs and explain rationale.
+- Do not assume missing inputs (env vars, paths, tags, endpoints); ask first.
+- Do not change defaults without summarizing impact and getting confirmation.
+- If docs and implementation disagree, report and ask which to follow.
+
+## Diagnostics & execution safety
+- Base analysis on logs/outputs; label hypotheses.
+- Repro steps must include command, env vars, expected result, failure point.
+- Check versions when relevant (nitro-cli, Docker, OS, kernel).
+- If scope is ambiguous or destructive/irreversible, summarize impact and ask.
+
+## External references
+- When relying on the whitepaper, cite the section or assumption briefly.
