@@ -123,6 +123,10 @@ flowchart LR
   - gateway는 overlap 동안 구/신 키 모두를 수용한다.
   - client는 config 갱신 후 새 키를 우선 사용한다.
 
+NOTE: 현재 구현은 oHTTP 키 로직이 아직 완성되지 않았지만,
+one-shot deploy는 `OHTTP_SEEDS_SECRET_REF`를 `server-1`/`server-3`에 전달하도록 준비되어 있다.
+향후 gateway/auth 구현 시 이 입력을 반드시 사용하도록 한다.
+
 주의(명시): 옵션 A는 운영 단순성이 장점이지만, seed가 `server-3`에도 존재할 수 있어 권한 분리 관점이 약해질 수 있다. 따라서 장기적으로 옵션 C로 확장한다.
 
 ### 향후 확장: 옵션 C — 투명성(Transparency) 기반 키 번들 배포
