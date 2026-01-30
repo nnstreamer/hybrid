@@ -74,14 +74,17 @@ OpenPCC 표준을 기반으로, v0.001 프로토타입 아키텍처를 v0.002로
 
 ```mermaid
 flowchart LR
-  C[Client (CLI/SDK)] -->|GET /api/config| A[server-3 (Auth)]
-  A -->|Remote Config:\n- relay URL(s)\n- oHTTP key configs(+rotation)\n- router/gateway URL| C
+  C[Client] -->|GET api config| A[server-3 Auth]
+  A -->|Remote Config<br/>relay URLs<br/>oHTTP key configs and rotation<br/>router and gateway URL| C
 
-  C -->|Encapsulated oHTTP request| R[server-4 (oHTTP Relay)]
-  R -->|Forward only (no decrypt)| G[server-1 (oHTTP Gateway)]
-  G -->|Decapsulate\nAllow-list routing| RT[server-1 (Router)]
-  RT -->|Forward encrypted payload| CN[server-2 (Compute Node / Enclave)]
-  CN -->|Encrypted response| RT --> G --> R --> C
+  C -->|Encapsulated oHTTP request| R[server-4 Relay]
+  R -->|Forward only| G[server-1 Gateway]
+  G -->|Decapsulate<br/>Allow-list routing| RT[server-1 Router]
+  RT -->|Forward encrypted payload| CN[server-2 Compute Enclave]
+  CN -->|Encrypted response| RT
+  RT --> G
+  G --> R
+  R --> C
 ```
 
 - 핵심 포인트
