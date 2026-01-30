@@ -59,6 +59,12 @@ OpenPCC 표준을 기반으로, v0.001 프로토타입 아키텍처를 v0.002로
   - oHTTP 키를 알 필요가 없다(키 없이도 포워딩 가능)
   - 요청 내용을 복호화하지 않는다
 
+## 기본 포트 (v0.002 기본값)
+
+- `server-1` Router: `3600`
+- `server-1` Gateway: `3200`
+- `server-4` Relay: `3100`
+
 
 ## 신뢰/위협 모델(요약) (Trust & Threat Model)
 

@@ -103,7 +103,7 @@ on:
       gateway_port:
         type: string
         description: Gateway port on server-1 (relay upstream)
-        default: "3600"
+        default: "3200"
       ohttp_seeds_secret_ref:
         type: string
         description: Optional oHTTP seed secret reference (shared for server-1/3)
@@ -137,7 +137,7 @@ jobs:
       RESOLVED_AUTH_AMI_ID: ${{ inputs.auth_ami_id != '' && inputs.auth_ami_id || vars.OPENPCC_AUTH_AMI_ID }}
       RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
       RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
-      RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3600' }}
+      RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3200' }}
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
     steps:
       - name: Checkout
