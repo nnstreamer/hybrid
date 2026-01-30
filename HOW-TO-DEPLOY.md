@@ -90,6 +90,7 @@ AWS 콘솔 → ECR → Create repository
 ### 3-2. Security Group 예시 (권장: 분리)
 
 - Router(서버-1)
+  - TCP 3200 (gateway)
   - TCP 3600 (router)
   - TCP 3501 (credithole)
 - Compute(서버-2)

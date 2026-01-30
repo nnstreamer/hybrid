@@ -63,12 +63,14 @@ class EntrypointTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "calls.log")
             credithole = _make_stub(tmpdir, "mem-credithole", log_file)
+            gateway = _make_stub(tmpdir, "mem-gateway", log_file)
             router = _make_stub(tmpdir, "mem-router", log_file)
 
             env = os.environ.copy()
             env.update(
                 {
                     "MEM_CREDITHOLE_BIN": credithole,
+                    "MEM_GATEWAY_BIN": gateway,
                     "MEM_ROUTER_BIN": router,
                     "TEST_LOG_FILE": log_file,
                 }
@@ -78,18 +80,22 @@ class EntrypointTests(unittest.TestCase):
             result = self._run_entrypoint(env)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-            lines = _wait_for_lines(log_file, 2)
+            lines = _wait_for_lines(log_file, 3)
             credithole_calls = self._parse_calls(lines, credithole)
+            gateway_calls = self._parse_calls(lines, gateway)
             router_calls = self._parse_calls(lines, router)
 
             self.assertEqual(len(credithole_calls), 1, lines)
             self.assertEqual(len(credithole_calls[0]), 1, credithole_calls)
+            self.assertEqual(len(gateway_calls), 1, lines)
+            self.assertEqual(len(gateway_calls[0]), 1, gateway_calls)
             self.assertEqual(len(router_calls), 1, lines)
 
     def test_custom_credithole_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             log_file = os.path.join(tmpdir, "calls.log")
             credithole = _make_stub(tmpdir, "mem-credithole", log_file)
+            gateway = _make_stub(tmpdir, "mem-gateway", log_file)
             router = _make_stub(tmpdir, "mem-router", log_file)
             config_path = "/tmp/credithole.yaml"
 
@@ -97,6 +103,7 @@ class EntrypointTests(unittest.TestCase):
             env.update(
                 {
                     "MEM_CREDITHOLE_BIN": credithole,
+                    "MEM_GATEWAY_BIN": gateway,
                     "MEM_ROUTER_BIN": router,
                     "CREDITHOLE_CONFIG": config_path,
                     "TEST_LOG_FILE": log_file,
@@ -106,8 +113,9 @@ class EntrypointTests(unittest.TestCase):
             result = self._run_entrypoint(env)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-            lines = _wait_for_lines(log_file, 2)
+            lines = _wait_for_lines(log_file, 3)
             credithole_calls = self._parse_calls(lines, credithole)
+            gateway_calls = self._parse_calls(lines, gateway)
             router_calls = self._parse_calls(lines, router)
 
             self.assertEqual(len(credithole_calls), 1, lines)
@@ -116,6 +124,8 @@ class EntrypointTests(unittest.TestCase):
                 [credithole, "-config", config_path],
                 credithole_calls,
             )
+            self.assertEqual(len(gateway_calls), 1, lines)
+            self.assertEqual(len(gateway_calls[0]), 1, gateway_calls)
             self.assertEqual(len(router_calls), 1, lines)
 
 
