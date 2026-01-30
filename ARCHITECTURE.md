@@ -1,178 +1,248 @@
-# The objective
+## 목적 (Objective)
 
-For better understandings for developers and auditors.
-For proper code generations for coding agents (cursor and antigravity).
+OpenPCC 표준을 기반으로, v0.001 프로토타입 아키텍처를 v0.002로 확장한다. v0.002는 다음을 추가/개선한다.
 
-# Overall Architecture
+- Real Attestation 지원을 위한 `server-3 (auth)` 추가
+- oHTTP 지원을 위한 `server-4 (relay)` 추가 및 `server-1`의 `router + gateway` 역할 명시
+- One-time deploy workflow 추가 (단, bootstrap 이슈 해결을 위해 순차 배포 허용)
 
-The followings are the basic components.
-- TAOS-D
-- server-1
-- server-2
-- server-3-auth (not included in this version)
-- client
-- .github/workflows
+본 문서는 구현 상세가 아니라 컴포넌트 책임 경계, 데이터 흐름, 배포/운영 원칙을 고정한다.
 
-TAOS-D is a common basis OS for server-1 and server-2.
-However, in the first prototypes, this is not required.
 
-server-1 is the router (openpcc-router).
+## 범위 (Scope)
 
-server-2 is the compute node (ConfidentCompute: compute_boot, router_com, compute_worker) in enclave.
+- In scope
+  - `server-1`: Router + oHTTP Gateway
+  - `server-2`: Compute Node (Nitro Enclave 기반)
+  - `server-3`: Auth (Remote Config 제공 + Real Attestation 지원)
+  - `server-4`: oHTTP Relay (원칙은 제3자 운영, v0.002는 동일 운영자 배포)
+  - `client`: CLI 중심 테스트/샘플 클라이언트(현재 리포에 존재)
 
-client is planned as an Android/Tizen helper for application writers with openpcc client, but is not included in this version.
+- Out of scope (v0.002)
+  - 결제/크레딧/BlindBank(OpenPCC의 BlindBank 포함 결제 플로우)은 요구사항에 없으므로 미구현 범위 밖으로 둔다.
+  - 단, OpenPCC 용어 정합성을 위해 “AuthBank/BlindBank 개념”은 참조 가능하되, v0.002 구현 대상으로 간주하지 않는다.
 
-Github action scripts are stored at .github/workflows, which will use the resources in server-1, server-2, and client for corresponding actions.
 
-## integration and deployment
+## 컴포넌트 개요 (Components)
 
-Integration (packing or building) step and deployment step are separated.
+### `server-1` (Router + oHTTP Gateway)
 
-In github workflows, the two steps should be explicitly separated so that developers can deploy without packging/building and they can also pack/build without deploying. Besides, developers are not allowed to do packing/building and deploying with a single action. Developers should be able to examine test results after packing/building and determine whether to proceed with deployment throughly.
+- Router
+  - Compute node registry / health / load balancing
+  - 클라이언트 요청을 선택된 compute 노드로 forwarding
+- oHTTP Gateway
+  - oHTTP 요청을 디캡슐화(outer layer 제거)
+  - allow-list된 내부 서비스로만 전달(보안 경계)
+  - 디캡슐화 후의 내부 요청은 Router로 전달하는 것을 기본으로 한다
 
-Each component, TAOS-D, client, server-1, and server-2, should be also independently triggered to be built or deployed.
+### `server-2` (Compute Node)
 
-Building: building component Docker images (installable and executable container images).
-Packaging: optionally producing Nitro Enclave EIF artifacts from server-2 images.
-Deploying: installing an image to a server.
+- Nitro Enclave 내에서 추론 수행(요청 복호화 종단)
+- Real Attestation evidence 생성/제공 (검증은 기본적으로 client 측에서 수행하는 것을 원칙으로 함)
+- v0.002는 “Real Attestation을 사용할 수 있는 구조”를 명시하며, 구체 evidence 포맷/검증 정책은 구성(또는 향후 문서)로 분리 가능
 
-## Version 0.001, the first prototype
+### `server-3` (Auth)
 
-Follow the OPENPCC whitepaper: https://github.com/openpcc/openpcc/blob/main/whitepaper/openpcc.pdf
+- 클라이언트가 시스템에 접속하기 위한 control-plane 엔드포인트
+- 역할
+  - Remote Config 제공: relay URL 목록, oHTTP key config(+회전정보), router/gateway endpoint 등
+  - Real Attestation 사용을 위한 정책/구성 제공(“무엇을 검증해야 하는가”)
+- 비역할(명시)
+  - v0.002에서는 결제/크레딧/BlindBank는 다루지 않는다
 
-OpenPCC 표준을 기반으로 하여, **프라이버시 중심의 LLM 추론(Prototype 1)**을 위한 **설계 명세서**를 다음과 같이 정의합니다. 이 명세서는 단일 GitHub 리포지토리(`nnstreamer/hybrid`) 내에서의 관리와 AWS 환경으로의 배포를 목표로 합니다.
+### `server-4` (oHTTP Relay)
 
----
+- 역할
+  - 제3자 운영이 이상적(표준 가정)
+  - encrypted/encapsulated 요청을 gateway로 포워딩
+- 비역할(명시)
+  - oHTTP 키를 알 필요가 없다(키 없이도 포워딩 가능)
+  - 요청 내용을 복호화하지 않는다
 
-### **[OpenPCC Prototype 1 설계 명세서]**
 
-#### **1. 컴포넌트별 세부 구성**
+## 신뢰/위협 모델(요약) (Trust & Threat Model)
 
-**A. /client (OpenPCC SDK & CLI)**
-*   **역할**: 데이터 암호화 및 증명(Attestation) 검증 [1, 2].
-*   **주요 기능**:
-    *   **Attestation Verifier**: Router로부터 받은 ComputeNode의 TPM Quote 및 PCR 값을 검증하여 신뢰성을 확인합니다 [2-4].
-    *   **HPKE Key Handler**: ComputeNode의 **REK(Request Encryption Key)**를 사용하여 **DEK(Data Encryption Key)**를 암호화합니다 [5-7].
-    *   **BHTTP Serializer**: 프롬프트를 **Binary HTTP** 형식으로 인코딩하고 DEK로 암호화합니다 [6, 8].
-*   **Prototype 2 대비**: 추후 AuthBank에서 발급받을 'User Badge'를 HTTP 헤더에 담을 수 있는 공간을 설계에 포함합니다 [9, 10].
+- 목표: 단일 컴포넌트가 사용자 식별자와 요청 내용을 동시에 확보하지 못하게 한다.
+- Relay(`server-4`): 사용자의 네트워크 메타데이터(IP 등)는 볼 수 있으나, 요청 내용은 모른다.
+- Gateway(`server-1`): 요청 내용을 디캡슐화하나, Relay를 통해 들어온 요청이므로 원칙적으로 사용자 식별 메타데이터는 최소화된다.
+- Router(`server-1`): compute 선택 및 forwarding 수행, 사용자 신원 정보를 보유하지 않는다.
+- Compute(`server-2`): 요청 내용을 복호화 가능한 종단(추론 수행), 사용자 신원 정보를 직접 받지 않는 구조를 유지한다.
+- Auth(`server-3`): Remote Config/정책의 배포 지점이며, v0.002 범위에서 “결제/크레딧으로 신원 결합”은 하지 않는다.
 
-**B. /server-1 (OpenPCC Router)**
-*   **역할**: 클라이언트 요청 중계 및 로드 밸런싱 [11-13].
-*   **주요 기능**:
-    *   **Node Registry**: 가용한 ComputeNode들의 증명 번들을 캐싱하고 클라이언트에게 전달합니다 [12, 14].
-    *   **Stateless Forwarding**: 클라이언트의 암호화된 요청을 내용 복호화 없이 ComputeNode로 전달합니다 [11, 15].
-    *   **Anonymization (향후)**: 현재는 직접 중계하지만, 구조적으로 OHTTP Gateway와 연결될 수 있도록 설계합니다 [16, 17].
 
-**C. /server-2 (OpenPCC ComputeNode)**
-*   **역할**: **AWS Nitro Enclave** 내 격리된 추론 환경 제공 [18, 19].
-*   **주요 기능**:
-    *   **Enclave Runtime (Security Layer)**: TPM 2.0과 연동하여 REK를 생성하고, 클라이언트의 DEK를 복호화합니다 [19-21].
-    *   **Inference Engine (Compute Layer)**: CPU 기반 경량 모델(예: Llama-3-8B)을 실행합니다 [22, 23].
-    *   **Hardening**: **SELinux**를 통한 프로세스 격리, **dm-verity**를 이용한 읽기 전용 파일 시스템, SSH 등 모든 원격 접속 수단 차단을 적용합니다 [24-27].
-
----
-
-#### **1-1. Prototype 1 한계점 및 전환 계획**
-
-*   **개발용 TPM 시뮬레이터 사용**: v0.001은 Compute Enclave에서 TPM Simulator에 의존하며, 이는 **개발/검증용 임시 구성**입니다.
-*   **Enclave 네트워크 제약 대응**: Enclave는 기본 네트워크가 없으므로, Router/TPM 접근은 **VSOCK 기반 프록시**로 중계합니다.
-*   **VSOCK CID 관리**: Enclave는 **CID(주소 식별자)**로 접근하며, 기본값(16)을 사용합니다. 변경 시 호스트/Enclave 프록시 구성이 함께 맞춰져야 합니다.
-*   **정식 서비스 전환**: 운영 환경에서는 **TPM Simulator를 제거**하고, **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
-
----
-
-#### **1-2. Deployment View (v0.001, VSOCK + 서비스 구성)**
+## 데이터 플로우 1: Config 획득 + oHTTP 요청 경로
 
 ```mermaid
 flowchart LR
-  subgraph RouterEC2["EC2: server-1 (Router)"]
-    R[mem-router :3600]
-  end
+  C[Client (CLI/SDK)] -->|GET /api/config| A[server-3 (Auth)]
+  A -->|Remote Config:\n- relay URL(s)\n- oHTTP key configs(+rotation)\n- router/gateway URL| C
 
-  subgraph ComputeHost["EC2: server-2 (Compute Host)"]
-    H1[openpcc-tpm-sim\n(TPM Simulator)]
-    H2[openpcc-vsock-router\n(vsock-proxy)]
-    H3[openpcc-vsock-tpm-cmd\n(vsock-proxy)]
-    H4[openpcc-vsock-tpm-platform\n(vsock-proxy)]
-    H5[openpcc-enclave-health-proxy\n(socat TCP->VSOCK)]
-  end
-
-  subgraph Enclave["Nitro Enclave (CID=16)"]
-    E1[compute_boot]
-    E2[router_com :8081]
-    E3[compute_worker / LLM 엔진]
-    EP1[socat TCP->VSOCK\n(127.0.0.1:3600)]
-    EP2[socat TCP->VSOCK\n(127.0.0.1:2321/2322)]
-    EP3[socat VSOCK->TCP\n(:8081)]
-  end
-
-  R <--> |HTTP 3600| H2
-  H2 <--> |VSOCK:3600| EP1
-  EP1 --> E2
-
-  H1 <--> |TCP 2321/2322| H3
-  H1 <--> |TCP 2321/2322| H4
-  H3 <--> |VSOCK:2321| EP2
-  H4 <--> |VSOCK:2322| EP2
-  EP2 --> E1
-
-  R <-->|HTTP 8081| H5
-  H5 <-->|VSOCK:8081| EP3
-  EP3 --> E2
+  C -->|Encapsulated oHTTP request| R[server-4 (oHTTP Relay)]
+  R -->|Forward only (no decrypt)| G[server-1 (oHTTP Gateway)]
+  G -->|Decapsulate\nAllow-list routing| RT[server-1 (Router)]
+  RT -->|Forward encrypted payload| CN[server-2 (Compute Node / Enclave)]
+  CN -->|Encrypted response| RT --> G --> R --> C
 ```
 
-**서비스 목록 (v0.001)**
-- Compute Host: `openpcc-tpm-sim`, `openpcc-vsock-router`, `openpcc-vsock-tpm-cmd`, `openpcc-vsock-tpm-platform`, `openpcc-enclave-health-proxy`, `openpcc-compute-monitor (debug only)`
-- Enclave 내부: `compute_boot`, `router_com`, `compute_worker` (LLM 엔진은 enclave 내부)
+- 핵심 포인트
+  - `server-3`는 client가 사용할 relay URL과 gateway 공개키 구성(oHTTP key config)을 제공한다.
+  - `server-4`는 키를 몰라도 되고, 포워딩만 한다.
+  - `server-1`은 gateway로서 디캡슐화 후 allow-list된 내부 라우팅만 수행하며, 그 다음 router가 compute로 forwarding 한다.
 
-`openpcc-compute-monitor`는 디버깅 목적의 호스트 웹 로그 UI이며, 서비스 환경에서는 반드시 제거/비활성화해야 합니다.
 
----
+## oHTTP 키/회전 정책 (v0.002: 옵션 A, 향후 옵션 C 확장)
 
-#### **2. 빌드 및 패키징 (Step 1)**
+### v0.002 채택: 옵션 A — 공유 Seed 기반 결정적 키 생성
 
-이 단계에서는 각 컴포넌트를 컨테이너화하고, 특히 Server-2를 Nitro Enclave용 이미지로 변환합니다.
+목표: `server-1(gateway)`와 `server-3(auth)`가 동일한 key material “정합성”을 갖도록, seed 기반으로 동일한 key config를 결정적으로 생성한다.
 
-*   **Docker 이미지 구성**:
-    1.  **`client-image`**: SDK 사용 예제 및 CLI 도구 포함.
-    2.  **`router-image`**: Go 기반 Router 바이너리 포함.
-    3.  **`compute-enclave-image`**: Ubuntu 22.04 기반, 추론 엔진, 모델 파일 및 OpenPCC 보안 서비스 포함 [28, 29].
-*   **Enclave Image File (EIF) 빌드**:
-    *   Prototype 1에서는 **Router 주소/Compute 호스트 정보가 배포 시점에 확정**되므로, EIF는 **배포 단계에서 생성**하는 흐름(A 방식)을 기본으로 합니다.
-    *   빌드 단계에서는 **compute Docker 이미지까지만 생성**하고, 배포 시점에 `router_com.yaml`에 Router 주소를 고정한 뒤 `nitro-cli build-enclave`로 EIF를 생성합니다.
+- 운영 개념
+  - 보안 저장소(예: AWS Secrets Manager 등)에 다음을 저장한다.
+    - `OHTTP_KEYS[]`:
+      - `key_id` (byte/짧은 ID)
+      - `seed_hex`
+      - `active_from`
+      - `active_until`
+- 배포 시 동작
+  - `server-1 (gateway)`:
+    - seed로 keypair(private 포함)를 생성/로딩하여 디캡슐화에 사용한다.
+  - `server-3 (auth)`:
+    - 동일 seed로 public key config(+rotation periods)를 생성하여 `/api/config`에 포함한다.
+- 회전 정책(최소)
+  - 새 키는 `active_from = T + Δ`로 “미리 배포”한다.
+  - 이전 키는 overlap 기간을 두고 `active_until`까지 유지한다.
+  - gateway는 overlap 동안 구/신 키 모두를 수용한다.
+  - client는 config 갱신 후 새 키를 우선 사용한다.
 
----
+주의(명시): 옵션 A는 운영 단순성이 장점이지만, seed가 `server-3`에도 존재할 수 있어 권한 분리 관점이 약해질 수 있다. 따라서 장기적으로 옵션 C로 확장한다.
 
-#### **3. AWS 배포 및 CI/CD (Step 2)**
+### 향후 확장: 옵션 C — 투명성(Transparency) 기반 키 번들 배포
 
-`.github/workflows` 내에 작성할 **GitHub Actions**의 논리적 흐름입니다.
+목표: oHTTP key config(+rotation) 배포를 “감사 가능하고 검증 가능한 번들”로 강화한다.
 
-**Workflow 이름: `OpenPCC Proto 1 Deploy`**
+- 키 config(+rotation periods)를 투명성(서명된 statement bundle)로 게시한다.
+- `server-3`는 `/api/config`에서 해당 번들을 제공(또는 해시/URI 제공)한다.
+- client는 번들을 검증하고, 검증된 키만 사용한다.
 
-1.  **환경 준비**:
-    *   AWS 자격 증명 설정 (Secrets 사용).
-    *   AWS CLI 및 Nitro CLI 설치.
+명시: v0.002는 옵션 A를 기본으로 하되, 외부 감사/표준 정합성 강화를 위해 옵션 C로 확장한다.
 
-2.  **Build & Push (Docker)**:
-    *   Client, Router, ComputeApp 각각의 Docker 이미지를 빌드합니다.
-    *   **Amazon ECR (Elastic Container Registry)**에 이미지를 푸시합니다.
 
-3.  **Enclave Artifact 생성 (Server-2 집중)**:
-    *   **배포 단계에서 Compute 호스트가 EIF를 생성**합니다. 이때 Router의 **내부 주소**와 Compute 호스트의 **내부 주소**를 `router_com.yaml`에 고정하여 **Router 등록이 가능한 EIF**를 만듭니다.
-    *   생성된 EIF의 **Enclave ID (PCR 값들)**를 추출하여 Router의 구성 파일이나 별도의 Transparency Log에 등록합니다 [31, 32].
+## Real Attestation (요약)
 
-4.  **AWS Infrastructure 배포**:
-    *   **Terraform** 또는 AWS CLI를 사용하여 다음을 생성/업데이트합니다:
-        *   **Router용 EC2**: 일반 인스턴스.
-        *   **ComputeNode용 EC2**: **Enclave-enabled** 인스턴스 유형 (예: c5.2xlarge).
-    *   ComputeNode 호스트 EC2 내에서 **Router 주소가 고정된 EIF**를 로드하여 Enclave를 실행합니다.
+- 목표: fake/sim 기반 흐름을 넘어, 실제 attestation evidence를 이용한 검증 흐름을 추가한다.
+- 원칙(구조)
+  - Evidence 생성: `server-2 (compute)` 측
+  - Evidence 검증: 기본적으로 `client` 측(또는 client에 포함된 검증 로직/라이브러리)
+  - `server-3 (auth)`는 “검증 정책/구성”의 배포 지점으로 동작한다.
+- 문서 최소 요구사항
+  - client가 무엇(어떤 증거/측정값/정책 버전)을 검증해야 하는지와,
+  - 그 정책이 어디서 오며(server-3), 어떤 방식으로 업데이트되는지(구성/릴리즈)를 명시한다.
 
----
 
-#### **4. 설계의 핵심 원칙 (Prototype 1)**
+## 운영 가정: Relay 제3자 운영 원칙 vs v0.002 현실
 
-*   **No Privileged Access**: 배포된 ComputeNode 이미지에는 SSH 데몬이 제거되어야 하며, `cloud-init` 등을 통한 런타임 수정을 금지합니다 [24, 27].
-*   **Immutable Infrastructure**: ComputeNode는 **배포 시점에 Router 주소를 고정한 EIF**로 실행되며, 런타임 변경(SSH, cloud-init 재설정 등)을 금지합니다. `dm-verity`를 통해 파일 시스템 변조를 방지합니다 [19, 26, 33].
-*   **Compatibility**: `/client`와 `/server-1` 사이의 프로토콜에 **User Badge** 헤더 자리를 미리 확보하여, Prototype 2에서 인증 로직 추가 시 통신 규격을 바꿀 필요가 없게 합니다 [9, 10].
+- 표준(OpenPCC) 가정: oHTTP Relay는 제3자 운영이 권장된다(상관관계/공모 위험을 분산).
+- v0.002 현실: 현재 제3자 relay 운영자가 없어 `server-4`를 동일 운영자가 함께 배포한다.
+- 영향
+  - 동일 운영자 하에서는 relay와 gateway/router의 메타데이터 결합 위험이 증가할 수 있다.
+- 최소 완화책(권장)
+  - relay 로그 최소화 및 짧은 보존 기간
+  - gateway/router에서 사용자 식별자(IP 등) 비저장 원칙
+  - 향후 제3자 relay로 전환 계획 유지
 
-이 설계 명세서는 OpenPCC가 강조하는 **"모든 하드웨어 및 소프트웨어 요소가 클라이언트에 의해 증명 가능해야 한다"**는 원칙을 Prototype 1 수준에서 완벽하게 구현하는 데 초점을 맞추고 있습니다 [3, 34, 35].
+
+## CI/CD 및 배포 (Workflows)
+
+### 기본 원칙: 분리 워크플로 유지
+
+- 기본 운영 모드에서는 build/pack과 deploy를 분리한다.
+  - `build-pack` (빌드/패키징)
+  - `deploy` (배포)
+- 목적: 테스트/검증 후 배포 의사결정, 감사/재현성 확보
+
+### 예외: One-time deploy workflow (v0.002 추가)
+
+- 요구: 한 번에 build/pack/deploy를 수행한다(이미지를 따로 확보해 나중에 deploy하는 흐름은 요구하지 않음).
+- 문제: server-1 주소가 deploy 단계에서 확정되며, server-2/4가 이를 설정에 포함해야 하는 bootstrap 이슈
+- v0.002 허용 설계: 순차 배포로 단순화
+  - 먼저 `server-1`과 `server-3`를 build/pack/deploy하여 server-1 주소를 확보
+  - 이후 확보한 주소를 입력으로 `server-2`와 `server-4`를 build/pack/deploy
+
+
+## 배포/CI 다이어그램 2: One-time deploy 순차 배포
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant GH as GitHub Actions (one-time deploy)
+  participant S1 as server-1 (Router+Gateway)
+  participant S3 as server-3 (Auth)
+  participant S2 as server-2 (Compute)
+  participant S4 as server-4 (Relay)
+
+  GH->>S1: build/pack/deploy server-1
+  GH->>S3: build/pack/deploy server-3
+  Note over GH: Outputs acquired after deploy:\n- server-1 internal IP/DNS\n- endpoints needed for config
+
+  GH->>S2: build/pack/deploy server-2\n(bake-in server-1 address if needed)
+  GH->>S4: build/pack/deploy server-4\n(configure upstream gateway=server-1)
+```
+
+- 핵심: one-time deploy에서는 “server-1/3 → server-2/4” 순서로 bootstrap 이슈를 우회할 수 있다.
+
+
+## `server-3 /api/config` 최소 스키마 (제안)
+
+v0.002 범위(결제/크레딧/BlindBank 제외)에서 client가 oHTTP 요청을 만들고 Real Attestation 검증 기준을 얻기 위해 필요한 최소 필드만 정의한다.
+
+| 필드 | 타입(개념) | 의미 | 소스(누가 정함) | 사용처 |
+|---|---|---|---|---|
+| `version` | string | config 스키마/호환 버전(예: `0.002`) | `server-3`(릴리즈) | client 호환성/기능 분기 |
+| `features.ohttp` | bool | oHTTP 사용 여부 | `server-3` | client 동작 분기 |
+| `features.real_attestation` | bool | Real Attestation 사용 여부 | `server-3` | client 동작 분기 |
+| `relay_urls[]` | list(string) | oHTTP relay endpoint 목록 | 운영 설정(현재는 `server-4`) | client oHTTP 요청 목적지 |
+| `gateway_url` | string | oHTTP gateway(base URL) | 운영 설정(= `server-1`) | relay upstream/디버그/검증 |
+| `router_url` | string | router endpoint 또는 표준 host 표기 | 운영 설정(= `server-1`) | 디캡슐화 후 라우팅 목적지 |
+| `ohttp_key_configs_bundle` | bytes/base64 | gateway 공개키 구성(oHTTP key configs) 번들 | 옵션 A: 공유 seed 기반 생성 | client oHTTP 캡슐화 |
+| `ohttp_key_rotation_periods` | json/list | key별 회전/유효기간(또는 힌트) | 옵션 A: seed 메타 기반 생성 | client 키 선택/캐시 |
+| `attestation.policy_id` | string | 검증 정책 버전/ID | `server-3`(정책 릴리즈) | client 검증 기준 식별 |
+| `attestation.allowed_*` | object | 허용 측정값/이미지/증거 제약(구현별) | `server-3` | client attestation 검증 |
+| `attestation.verifier_hints` | object(선택) | 검증 모드/라이브러리 힌트 | `server-3` | client verifier 선택 |
+
+옵션 C 확장 시 `ohttp_key_configs_bundle`은 “투명성 번들(또는 URI+해시)”로 강화되며, client는 해당 번들을 검증 후 키를 사용한다.
+
+
+## One-time deploy: outputs/env 변수 (제안)
+
+요구사항의 핵심은 “server-1 주소가 deploy에서 결정 → server-2/4가 그 값을 포함해야 함”이므로, one-time deploy는 아래 값을 server-1 배포 결과로 추출해 후속 단계에 전달한다.
+
+### Stage A(server-1 + server-3 먼저 배포)에서 반드시 산출할 값
+
+| 변수 | 예시 | 의미 | 생성 시점/소스 | Stage B 사용처 |
+|---|---|---|---|---|
+| `SERVER1_INTERNAL_ADDR` | `10.0.1.23` 또는 내부 DNS | server-1 내부 주소 | server-1 deploy 후 EC2 조회 | `server-2` 설정 bake-in, `server-4` upstream, `server-3` config |
+| `SERVER1_GATEWAY_URL` | `http://10.0.1.23/` | relay upstream gateway URL | `SERVER1_INTERNAL_ADDR`로 조합 | `server-4` upstream |
+| `OHTTP_SEEDS_SECRET_REF` | `arn:...:secret:ohttp-seeds:version` | 옵션 A seed 세트 참조 | 워크플로 입력/환경 고정 | `server-1`/`server-3` 동일 seed 강제 |
+
+### Stage B(server-2 + server-4 배포)에서 입력으로 필요한 값
+
+| 변수 | 의미 | 주입 대상 |
+|---|---|---|
+| `SERVER1_INTERNAL_ADDR` | server-2가 참조할 router/gateway 주소 | `server-2` build/pack/deploy |
+| `RELAY_UPSTREAM_GATEWAY_URL` | server-4 upstream gateway 주소 | `server-4` build/pack/deploy |
+| `IMAGE_TAG` | 릴리즈 단위 동기화 | 공통 |
+
+
+## 용어(Glossary)
+
+- oHTTP Relay: 제3자가 운영하는 프록시, 사용자 식별 메타데이터는 볼 수 있으나 내용은 복호화 불가
+- oHTTP Gateway: relay로부터 받은 oHTTP 메시지를 디캡슐화(outer layer 제거)하고 내부 서비스로 전달
+- Router: compute 후보 선택 및 forwarding 담당
+- Real Attestation: 실제 hardware/TEE 기반 attestation evidence를 통한 신뢰 검증 흐름
+
+
+## 문서 유지 방침
+
+- v0.002부터는 본 `ARCHITECTURE.md`가 단일 진실 공급원(SSOT)이다.
+- 이전 버전(v0.001) 텍스트를 문서에 병기하지 않는다.
+  - 이유: 다른 자동화 에이전트/개발자가 구버전 전제를 근거로 잘못된 행동을 하지 않도록 하기 위함.
