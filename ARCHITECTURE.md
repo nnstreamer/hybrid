@@ -126,9 +126,16 @@ flowchart LR
   - gateway는 overlap 동안 구/신 키 모두를 수용한다.
   - client는 config 갱신 후 새 키를 우선 사용한다.
 
-NOTE: 현재 구현은 oHTTP 키 로직이 아직 완성되지 않았지만,
-one-shot deploy는 `OHTTP_SEEDS_SECRET_REF`를 `server-1`/`server-3`에 전달하도록 준비되어 있다.
-향후 gateway/auth 구현 시 이 입력을 반드시 사용하도록 한다.
+NOTE: v0.002 one-shot deploy는 oHTTP 키 동기화 입력을 **이미 전달/구성하도록 준비되어 있다**.
+enable 조건 및 입력은 아래와 같다.
+
+- enable 옵션: one-shot deploy에서 `enable_ohttp=true`
+- 필수 입력:
+  - `OPENPCC_OHTTP_SEEDS_JSON` (seed 목록 JSON)
+  - `OPENPCC_OHTTP_SEEDS_SECRET_REF` (동일 seed 세트 참조)
+- 동작:
+  - `server-3`는 seeds JSON으로 public key config(+rotation)를 생성하여 `/api/config`에 포함한다.
+  - `server-1`은 `OHTTP_SEEDS_SECRET_REF`를 전달받아 gateway에서 seed 로딩에 사용한다.
 
 주의(명시): 옵션 A는 운영 단순성이 장점이지만, seed가 `server-3`에도 존재할 수 있어 권한 분리 관점이 약해질 수 있다. 따라서 장기적으로 옵션 C로 확장한다.
 
@@ -251,6 +258,15 @@ v0.002 범위(결제/크레딧/BlindBank 제외)에서 client가 oHTTP 요청을
 PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
 `SERVER1_INTERNAL_ADDR`(private IP)를 사용하도록 허용한다.
 이 가정은 임시이며, 다른 네트워크 구성에서는 별도 주소 입력이 필요하다.
+
+
+## Known Issues (v0.002)
+
+- `server-1`의 mem-gateway는 upstream(openpcc) `cmd/mem-gateway` 구현을 그대로 사용한다.
+  - 해당 구현에는 `BankURL = "http://localhost:3500"` 하드코딩이 존재한다.
+  - v0.002 범위에서는 credit/bank 플로우가 out of scope이므로 변경하지 않는다.
+  - 향후 credit 관련 문제가 생기면 **gateway의 BankURL(3500)** 과
+    **credithole 기본 포트(3501)** 정합 여부를 우선 확인한다.
 
 
 ## 용어(Glossary)
