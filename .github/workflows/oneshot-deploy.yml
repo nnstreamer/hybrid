@@ -83,7 +83,7 @@ on:
       enable_fake_attestation_for_server2:
         type: boolean
         description: Enable fake attestation for server-2 build (do not combine with real attestation for client)
-        default: false
+        default: true
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
@@ -111,7 +111,7 @@ on:
       enable_real_attestation_for_client:
         type: boolean
         description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
-        default: true
+        default: false
       relay_urls_json:
         type: string
         description: JSON array of relay URLs for server-3 config
