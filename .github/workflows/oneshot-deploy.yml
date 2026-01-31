@@ -106,8 +106,8 @@ on:
         default: ""
       enable_ohttp:
         type: boolean
-        description: Enable oHTTP config in server-3
-        default: true
+        description: Enable oHTTP config in server-3 (requires relay URLs and seeds)
+        default: false
       enable_real_attestation_for_client:
         type: boolean
         description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
