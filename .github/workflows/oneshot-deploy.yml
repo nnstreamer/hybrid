@@ -130,6 +130,113 @@ jobs:
       RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ secrets.OPENPCC_ATTESTATION_ALLOWED_JSON != '' && secrets.OPENPCC_ATTESTATION_ALLOWED_JSON || vars.OPENPCC_ATTESTATION_ALLOWED_JSON || '' }}
       RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON != '' && secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || vars.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || '' }}
     steps:
+      - name: Preflight validate config inputs
+        env:
+          ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
+          ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
+          ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2 }}
+          RELAY_URLS_JSON: ${{ env.RESOLVED_RELAY_URLS_JSON }}
+          OHTTP_SEEDS_JSON: ${{ env.RESOLVED_OHTTP_SEEDS_JSON }}
+          OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
+          ATTESTATION_POLICY_ID: ${{ env.RESOLVED_ATTESTATION_POLICY_ID }}
+          ATTESTATION_ALLOWED_JSON: ${{ env.RESOLVED_ATTESTATION_ALLOWED_JSON }}
+          ATTESTATION_VERIFIER_HINTS_JSON: ${{ env.RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def parse_bool(value, name, default):
+              if value is None or str(value).strip() == "":
+                  return default
+              lowered = str(value).strip().lower()
+              if lowered in ("true", "1", "yes", "y"):
+                  return True
+              if lowered in ("false", "0", "no", "n"):
+                  return False
+              raise SystemExit(f"{name} must be true/false (got '{value}')")
+
+          def require(name, value):
+              if value is None or str(value).strip() == "":
+                  raise SystemExit(f"Missing required value: {name}")
+
+          def parse_json(name, raw, expected_type):
+              try:
+                  data = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(f"{name} must be valid JSON: {exc}") from exc
+              if not isinstance(data, expected_type):
+                  raise SystemExit(f"{name} must be a {expected_type.__name__} JSON value")
+              return data
+
+          enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", False)
+          enable_real = parse_bool(
+              os.getenv("ENABLE_REAL_ATTESTATION_FOR_CLIENT"),
+              "ENABLE_REAL_ATTESTATION_FOR_CLIENT",
+              False,
+          )
+          enable_fake = parse_bool(
+              os.getenv("ENABLE_FAKE_ATTESTATION_FOR_SERVER2"),
+              "ENABLE_FAKE_ATTESTATION_FOR_SERVER2",
+              False,
+          )
+
+          if enable_real and enable_fake:
+              raise SystemExit(
+                  "enable_fake_attestation_for_server2=true is not consistent with "
+                  "enable_real_attestation_for_client=true. Disable one of them."
+              )
+
+          if enable_ohttp:
+              relay_raw = os.getenv("RELAY_URLS_JSON", "")
+              seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
+              seeds_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "")
+              require("OPENPCC_RELAY_URLS_JSON", relay_raw)
+              relay = parse_json("OPENPCC_RELAY_URLS_JSON", relay_raw, list)
+              if not relay:
+                  raise SystemExit("OPENPCC_RELAY_URLS_JSON must be a non-empty list")
+              for idx, item in enumerate(relay):
+                  if not isinstance(item, str) or not item.strip():
+                      raise SystemExit(
+                          f"OPENPCC_RELAY_URLS_JSON[{idx}] must be a non-empty string"
+                      )
+              require("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw)
+              seeds = parse_json("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw, list)
+              if not seeds:
+                  raise SystemExit("OPENPCC_OHTTP_SEEDS_JSON must be a non-empty list")
+              for idx, seed in enumerate(seeds):
+                  if not isinstance(seed, dict):
+                      raise SystemExit(f"OPENPCC_OHTTP_SEEDS_JSON[{idx}] must be an object")
+                  for key in ("key_id", "seed_hex", "active_from", "active_until"):
+                      value = seed.get(key)
+                      if not isinstance(value, str) or not value.strip():
+                          raise SystemExit(
+                              f"OPENPCC_OHTTP_SEEDS_JSON[{idx}].{key} must be a non-empty string"
+                          )
+              require("OPENPCC_OHTTP_SEEDS_SECRET_REF", seeds_ref)
+
+          att_policy_id = os.getenv("ATTESTATION_POLICY_ID", "")
+          allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
+          hints_raw = os.getenv("ATTESTATION_VERIFIER_HINTS_JSON", "")
+          if enable_real:
+              require("OPENPCC_ATTESTATION_POLICY_ID", att_policy_id)
+              require("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw)
+              require("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw)
+              parse_json("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw, dict)
+              parse_json("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw, dict)
+          else:
+              if (
+                  str(att_policy_id).strip()
+                  or str(allowed_raw).strip()
+                  or str(hints_raw).strip()
+              ):
+                  raise SystemExit(
+                      "attestation inputs provided but enable_real_attestation_for_client=false"
+                  )
+          PY
+
       - name: Checkout
         uses: actions/checkout@v4
 
