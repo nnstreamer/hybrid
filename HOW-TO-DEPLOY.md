@@ -87,15 +87,41 @@ AWS 콘솔 → ECR → Create repository
 
 배포할 VPC의 **퍼블릭 Subnet ID**가 필요합니다.
 
-### 3-2. Security Group 예시 (권장: 분리)
+### 3-2. AWS Security Group 설정
 
-- Router(서버-1)
-  - TCP 3200 (gateway)
+가능하면 **server-1/2/3/4를 분리된 Security Group**으로 구성하는 것을 권장합니다.
+
+#### server-1 (Router + Gateway)
+
+- 인바운드
   - TCP 3600 (router)
+  - TCP 3200 (gateway)
   - TCP 3501 (credithole)
-- Compute(서버-2)
+- 권장 접근 제어
+  - 3600은 server-2 SG에서만 허용
+  - 3200은 server-4 SG에서만 허용 (oHTTP relay 사용 시)
+
+#### server-2 (Compute)
+
+- 인바운드
   - TCP 8081 (router_com)
-  - 가능하면 **Router Security Group에서만 접근 허용** 권장
+- 권장 접근 제어
+  - **server-1 SG에서만 접근 허용** 권장
+
+#### server-3 (Auth)
+
+- 인바운드
+  - TCP 8080 (`/api/config`, `/healthz`)
+- 권장 접근 제어
+  - 운영 환경에 맞는 클라이언트/내부 네트워크만 허용
+
+#### server-4 (Relay)
+
+- 인바운드
+  - TCP 3100 (oHTTP relay)
+- 권장 접근 제어
+  - 클라이언트 접근 필요 범위에 맞게 제한
+  - **server-1 gateway(3200)** 으로의 아웃바운드가 가능해야 함
 
 ---
 
