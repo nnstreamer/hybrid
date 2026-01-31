@@ -80,9 +80,9 @@ on:
         type: boolean
         description: Install compute monitor on server-2 (debug only)
         default: true
-      enable_fake_attestation:
+      enable_fake_attestation_for_server2:
         type: boolean
-        description: Build compute_boot with fake attestation
+        description: Enable fake attestation for server-2 build (do not combine with real attestation for client)
         default: false
       enclave_cpu_count:
         type: string
@@ -108,9 +108,9 @@ on:
         type: boolean
         description: Enable oHTTP config in server-3
         default: true
-      enable_real_attestation:
+      enable_real_attestation_for_client:
         type: boolean
-        description: Enable real attestation policy in server-3
+        description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
         default: true
       relay_urls_json:
         type: string
@@ -164,8 +164,8 @@ jobs:
       RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3200' }}
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
       RESOLVED_ENABLE_OHTTP: ${{ inputs.enable_ohttp }}
-      RESOLVED_ENABLE_REAL_ATTESTATION: ${{ inputs.enable_real_attestation }}
-      RESOLVED_ENABLE_FAKE_ATTESTATION: ${{ inputs.enable_fake_attestation }}
+      RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ inputs.enable_real_attestation_for_client }}
+      RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ inputs.enable_fake_attestation_for_server2 }}
       RESOLVED_RELAY_URLS_JSON: ${{ inputs.relay_urls_json != '' && inputs.relay_urls_json || vars.OPENPCC_RELAY_URLS_JSON || '' }}
       RESOLVED_OHTTP_SEEDS_JSON: ${{ inputs.ohttp_seeds_json != '' && inputs.ohttp_seeds_json || secrets.OPENPCC_OHTTP_SEEDS_JSON || vars.OPENPCC_OHTTP_SEEDS_JSON || '' }}
       RESOLVED_ATTESTATION_POLICY_ID: ${{ inputs.attestation_policy_id != '' && inputs.attestation_policy_id || vars.OPENPCC_ATTESTATION_POLICY_ID || '' }}
@@ -286,8 +286,8 @@ jobs:
         if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
         env:
           ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
-          ENABLE_REAL_ATTESTATION: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION }}
-          ENABLE_FAKE_ATTESTATION: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION }}
+          ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
+          ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2 }}
           RELAY_URLS_JSON: ${{ env.RESOLVED_RELAY_URLS_JSON }}
           OHTTP_SEEDS_JSON: ${{ env.RESOLVED_OHTTP_SEEDS_JSON }}
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
@@ -335,17 +335,21 @@ jobs:
                       raise SystemExit(f"{name}[{idx}] must be a non-empty string")
 
           enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", True)
-          enable_real_attestation = parse_bool(
-              os.getenv("ENABLE_REAL_ATTESTATION"), "ENABLE_REAL_ATTESTATION", True
+          enable_real_attestation_for_client = parse_bool(
+              os.getenv("ENABLE_REAL_ATTESTATION_FOR_CLIENT"),
+              "ENABLE_REAL_ATTESTATION_FOR_CLIENT",
+              True,
           )
-          enable_fake_attestation = parse_bool(
-              os.getenv("ENABLE_FAKE_ATTESTATION"), "ENABLE_FAKE_ATTESTATION", False
+          enable_fake_attestation_for_server2 = parse_bool(
+              os.getenv("ENABLE_FAKE_ATTESTATION_FOR_SERVER2"),
+              "ENABLE_FAKE_ATTESTATION_FOR_SERVER2",
+              False,
           )
 
-          if enable_fake_attestation and enable_real_attestation:
+          if enable_fake_attestation_for_server2 and enable_real_attestation_for_client:
               raise SystemExit(
-                  "enable_fake_attestation=true is not consistent with real attestation policy. "
-                  "Disable real attestation or fake attestation."
+                  "enable_fake_attestation_for_server2=true is not consistent with "
+                  "enable_real_attestation_for_client=true. Disable one of them."
               )
 
           server1_router_url = os.getenv("SERVER1_ROUTER_URL", "").strip()
@@ -386,16 +390,20 @@ jobs:
           allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
           verifier_hints_raw = os.getenv("ATTESTATION_VERIFIER_HINTS_JSON", "")
 
-          if enable_real_attestation:
+          if enable_real_attestation_for_client:
               if not att_policy_id:
-                  raise SystemExit("attestation_policy_id is required when real attestation is enabled")
+                  raise SystemExit(
+                      "attestation_policy_id is required when real attestation for client is enabled"
+                  )
               allowed = parse_json(allowed_raw, "attestation_allowed_json", False, dict)
               verifier_hints = parse_json(
                   verifier_hints_raw, "attestation_verifier_hints_json", False, dict
               )
           else:
               if att_policy_id or allowed_raw.strip() or verifier_hints_raw.strip():
-                  raise SystemExit("attestation inputs provided but enable_real_attestation=false")
+                  raise SystemExit(
+                      "attestation inputs provided but enable_real_attestation_for_client=false"
+                  )
               allowed = {}
               verifier_hints = {}
 
@@ -403,7 +411,7 @@ jobs:
               "version": "0.002",
               "features": {
                   "ohttp": enable_ohttp,
-                  "real_attestation": enable_real_attestation,
+                  "real_attestation": enable_real_attestation_for_client,
               },
           }
 
@@ -417,7 +425,7 @@ jobs:
                   }
               )
 
-          if enable_real_attestation:
+          if enable_real_attestation_for_client:
               attestation = {
                   "policy_id": att_policy_id,
               }
@@ -497,7 +505,7 @@ jobs:
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
       RESOLVED_RELAY_INSTANCE_TYPE: ${{ inputs.relay_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
-      RESOLVED_COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.enable_fake_attestation && 'include_fake_attestation' || '' }}
+      RESOLVED_COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.enable_fake_attestation_for_server2 && 'include_fake_attestation' || '' }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
       RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
