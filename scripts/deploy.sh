@@ -101,7 +101,7 @@ OHTTP_ENV_ARGS=()
 if [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
   OHTTP_ENV_ARGS=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")
 fi
-docker run -d --restart unless-stopped --name openpcc-router -p 3600:3600 -p 3501:3501 "${OHTTP_ENV_ARGS[@]}" "${router_image_uri}"
+docker run -d --restart unless-stopped --name openpcc-router -p 3600:3600 -p 3501:3501 "\${OHTTP_ENV_ARGS[@]}" "${router_image_uri}"
 EOF
 
   mapfile -t common_args < <(make_common_args "${ROUTER_SECURITY_GROUP_ID}")
