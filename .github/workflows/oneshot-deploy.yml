@@ -44,22 +44,6 @@ on:
         type: string
         description: Base AMI ID (Ubuntu 22.04 recommended)
         default: ""
-      router_ami_id:
-        type: string
-        description: server-1 AMI ID override
-        default: ""
-      compute_ami_id:
-        type: string
-        description: server-2 AMI ID override
-        default: ""
-      auth_ami_id:
-        type: string
-        description: server-3 AMI ID override
-        default: ""
-      relay_ami_id:
-        type: string
-        description: server-4 AMI ID override
-        default: ""
       router_instance_type:
         type: string
         description: server-1 instance type
@@ -100,10 +84,6 @@ on:
         type: string
         description: Gateway port on server-1 (relay upstream)
         default: "3200"
-      ohttp_seeds_secret_ref:
-        type: string
-        description: Optional oHTTP seed secret reference (shared for server-1/3)
-        default: ""
       enable_ohttp:
         type: boolean
         description: Enable oHTTP config in server-3 (requires relay URLs and seeds)
@@ -112,26 +92,6 @@ on:
         type: boolean
         description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
         default: false
-      relay_urls_json:
-        type: string
-        description: JSON array of relay URLs for server-3 config
-        default: ""
-      ohttp_seeds_json:
-        type: string
-        description: JSON array of oHTTP seeds for server-3 config
-        default: ""
-      attestation_policy_id:
-        type: string
-        description: Attestation policy ID for server-3 config
-        default: ""
-      attestation_allowed_json:
-        type: string
-        description: JSON object of attestation allowed values
-        default: ""
-      attestation_verifier_hints_json:
-        type: string
-        description: JSON object of attestation verifier hints
-        default: ""
 
 env:
   IMAGE_TAG: ${{ github.sha }}
@@ -157,20 +117,18 @@ jobs:
       RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
       RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
       RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
-      RESOLVED_ROUTER_AMI_ID: ${{ inputs.router_ami_id != '' && inputs.router_ami_id || vars.OPENPCC_ROUTER_AMI_ID }}
-      RESOLVED_AUTH_AMI_ID: ${{ inputs.auth_ami_id != '' && inputs.auth_ami_id || vars.OPENPCC_AUTH_AMI_ID }}
       RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
       RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
       RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3200' }}
-      RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
+      RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ vars.OPENPCC_OHTTP_SEEDS_SECRET_REF != '' && vars.OPENPCC_OHTTP_SEEDS_SECRET_REF || '' }}
       RESOLVED_ENABLE_OHTTP: ${{ inputs.enable_ohttp }}
       RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ inputs.enable_real_attestation_for_client }}
       RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ inputs.enable_fake_attestation_for_server2 }}
-      RESOLVED_RELAY_URLS_JSON: ${{ inputs.relay_urls_json != '' && inputs.relay_urls_json || vars.OPENPCC_RELAY_URLS_JSON || '' }}
-      RESOLVED_OHTTP_SEEDS_JSON: ${{ inputs.ohttp_seeds_json != '' && inputs.ohttp_seeds_json || secrets.OPENPCC_OHTTP_SEEDS_JSON || vars.OPENPCC_OHTTP_SEEDS_JSON || '' }}
-      RESOLVED_ATTESTATION_POLICY_ID: ${{ inputs.attestation_policy_id != '' && inputs.attestation_policy_id || vars.OPENPCC_ATTESTATION_POLICY_ID || '' }}
-      RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ inputs.attestation_allowed_json != '' && inputs.attestation_allowed_json || secrets.OPENPCC_ATTESTATION_ALLOWED_JSON || vars.OPENPCC_ATTESTATION_ALLOWED_JSON || '' }}
-      RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ inputs.attestation_verifier_hints_json != '' && inputs.attestation_verifier_hints_json || secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || vars.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || '' }}
+      RESOLVED_RELAY_URLS_JSON: ${{ vars.OPENPCC_RELAY_URLS_JSON != '' && vars.OPENPCC_RELAY_URLS_JSON || '' }}
+      RESOLVED_OHTTP_SEEDS_JSON: ${{ secrets.OPENPCC_OHTTP_SEEDS_JSON != '' && secrets.OPENPCC_OHTTP_SEEDS_JSON || vars.OPENPCC_OHTTP_SEEDS_JSON || '' }}
+      RESOLVED_ATTESTATION_POLICY_ID: ${{ vars.OPENPCC_ATTESTATION_POLICY_ID != '' && vars.OPENPCC_ATTESTATION_POLICY_ID || '' }}
+      RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ secrets.OPENPCC_ATTESTATION_ALLOWED_JSON != '' && secrets.OPENPCC_ATTESTATION_ALLOWED_JSON || vars.OPENPCC_ATTESTATION_ALLOWED_JSON || '' }}
+      RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON != '' && secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || vars.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -201,11 +159,8 @@ jobs:
           require "subnet_id" "${RESOLVED_SUBNET_ID}"
           require "router_security_group_id" "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
           require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          require "ami_id" "${RESOLVED_AMI_ID}"
           require "gateway_port" "${RESOLVED_GATEWAY_PORT}"
-          if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_ROUTER_AMI_ID}" ]; then
-            echo "Missing required AMI: ami_id or router_ami_id." >&2
-            missing=1
-          fi
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -243,7 +198,6 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          ROUTER_AMI_ID: ${{ env.RESOLVED_ROUTER_AMI_ID }}
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
           # NOTE: Passed through for future gateway key sync. server-1 does not consume yet.
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
@@ -454,10 +408,7 @@ jobs:
             fi
           }
           require "auth_security_group_id" "${RESOLVED_AUTH_SECURITY_GROUP_ID}"
-          if [ -z "${RESOLVED_AUTH_AMI_ID}" ] && [ -z "${RESOLVED_AMI_ID}" ]; then
-            echo "Missing required AMI: auth_ami_id or ami_id." >&2
-            missing=1
-          fi
+          require "ami_id" "${RESOLVED_AMI_ID}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -473,7 +424,6 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          AUTH_AMI_ID: ${{ env.RESOLVED_AUTH_AMI_ID }}
           AUTH_INSTANCE_TYPE: ${{ env.RESOLVED_AUTH_INSTANCE_TYPE }}
           SERVER1_INTERNAL_ADDR: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
           SERVER1_GATEWAY_URL: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
@@ -500,8 +450,6 @@ jobs:
       RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
       RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
       RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
-      RESOLVED_COMPUTE_AMI_ID: ${{ inputs.compute_ami_id != '' && inputs.compute_ami_id || vars.OPENPCC_COMPUTE_AMI_ID }}
-      RESOLVED_RELAY_AMI_ID: ${{ inputs.relay_ami_id != '' && inputs.relay_ami_id || vars.OPENPCC_RELAY_AMI_ID }}
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
       RESOLVED_RELAY_INSTANCE_TYPE: ${{ inputs.relay_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
@@ -547,10 +495,7 @@ jobs:
           require "server1_internal_addr" "${SERVER1_INTERNAL_ADDR}"
           require "server1_router_url" "${SERVER1_ROUTER_URL}"
           require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
-          if [ -z "${RESOLVED_AMI_ID}" ] && [ -z "${RESOLVED_COMPUTE_AMI_ID}" ]; then
-            echo "Missing required AMI: ami_id or compute_ami_id." >&2
-            missing=1
-          fi
+          require "ami_id" "${RESOLVED_AMI_ID}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -595,10 +540,7 @@ jobs:
             fi
           }
           require "relay_security_group_id" "${RESOLVED_RELAY_SECURITY_GROUP_ID}"
-          if [ -z "${RESOLVED_RELAY_AMI_ID}" ] && [ -z "${RESOLVED_AMI_ID}" ]; then
-            echo "Missing required AMI: relay_ami_id or ami_id." >&2
-            missing=1
-          fi
+          require "ami_id" "${RESOLVED_AMI_ID}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -614,7 +556,6 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.SERVER1_ROUTER_URL }}
@@ -638,7 +579,6 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          RELAY_AMI_ID: ${{ env.RESOLVED_RELAY_AMI_ID }}
           RELAY_INSTANCE_TYPE: ${{ env.RESOLVED_RELAY_INSTANCE_TYPE }}
           RELAY_UPSTREAM_GATEWAY_URL: ${{ env.SERVER1_GATEWAY_URL }}
           SERVER1_INTERNAL_ADDR: ${{ env.SERVER1_INTERNAL_ADDR }}
