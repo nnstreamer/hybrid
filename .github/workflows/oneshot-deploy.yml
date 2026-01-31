@@ -48,6 +48,10 @@ on:
         type: boolean
         description: Enable server-3 build/deploy
         default: true
+      enable_server4:
+        type: boolean
+        description: Enable server-4 build/deploy
+        default: true
       ami_id:
         type: string
         description: Base AMI ID (Ubuntu 22.04 recommended)
@@ -82,7 +86,7 @@ on:
         default: "16"
       enable_ohttp:
         type: boolean
-        description: Enable oHTTP config in server-3 (requires relay URLs and seeds)
+        description: Enable server-3 to advertise relay URLs (requires relay URLs and seeds)
         default: false
       enable_real_attestation_for_client:
         type: boolean
@@ -625,6 +629,7 @@ jobs:
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
       RESOLVED_EDGE_INSTANCE_TYPE: ${{ inputs.edge_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
+      RESOLVED_ENABLE_SERVER4: ${{ inputs.enable_server4 }}
       RESOLVED_COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.enable_fake_attestation_for_server2 && 'include_fake_attestation' || '' }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
@@ -688,6 +693,7 @@ jobs:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           COMPUTE_IMAGE_NAME: openpcc-compute
           RELAY_IMAGE_NAME: ${{ env.SERVER4_IMAGE_NAME }}
+          ENABLE_SERVER4: ${{ env.RESOLVED_ENABLE_SERVER4 }}
         run: |
           set -euo pipefail
           ensure_repo() {
@@ -701,7 +707,11 @@ jobs:
             fi
           }
           ensure_repo "${COMPUTE_IMAGE_NAME}"
-          ensure_repo "${RELAY_IMAGE_NAME}"
+          if [[ "${ENABLE_SERVER4}" == "true" ]]; then
+            ensure_repo "${RELAY_IMAGE_NAME}"
+          else
+            echo "server-4 disabled; skipping relay repository creation."
+          fi
 
       - name: Validate stage B inputs
         run: |
@@ -737,7 +747,7 @@ jobs:
         run: bash scripts/build_pack.sh
 
       - name: Build server-4 image (if present)
-        if: ${{ hashFiles('server-4/Dockerfile') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('server-4/Dockerfile') != '' }}
         env:
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
           REGISTRY: ${{ env.IMAGE_REGISTRY }}
@@ -750,11 +760,15 @@ jobs:
           docker push "${image}"
 
       - name: Skip server-4 build
-        if: ${{ hashFiles('server-4/Dockerfile') == '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 != 'true' }}
+        run: echo "::notice::server-4 build disabled; skipping."
+
+      - name: Skip server-4 build (Dockerfile missing)
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('server-4/Dockerfile') == '' }}
         run: echo "::warning::server-4 Dockerfile not found; skipping build."
 
       - name: Validate server-4 inputs
-        if: ${{ hashFiles('scripts/deploy_server4.sh') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' }}
         run: |
           set -euo pipefail
           missing=0
@@ -794,7 +808,7 @@ jobs:
         run: bash scripts/deploy_server2.sh
 
       - name: Deploy server-4 (if script present)
-        if: ${{ hashFiles('scripts/deploy_server4.sh') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' }}
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
@@ -810,5 +824,9 @@ jobs:
         run: bash scripts/deploy_server4.sh
 
       - name: Skip server-4 deploy
-        if: ${{ hashFiles('scripts/deploy_server4.sh') == '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 != 'true' }}
+        run: echo "::notice::server-4 deploy disabled; skipping."
+
+      - name: Skip server-4 deploy (script missing)
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') == '' }}
         run: echo "::warning::scripts/deploy_server4.sh not found; skipping server-4 deploy."
