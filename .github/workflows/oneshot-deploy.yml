@@ -40,25 +40,21 @@ on:
         type: string
         description: Optional EC2 key pair name
         default: ""
+      enable_server3:
+        type: boolean
+        description: Enable server-3 build/deploy
+        default: true
       ami_id:
         type: string
         description: Base AMI ID (Ubuntu 22.04 recommended)
         default: ""
-      router_instance_type:
-        type: string
-        description: server-1 instance type
-        default: "t3.small"
       compute_instance_type:
         type: string
         description: server-2 instance type (Nitro Enclaves enabled)
         default: "c6a.4xlarge"
-      auth_instance_type:
+      edge_instance_type:
         type: string
-        description: server-3 instance type
-        default: "t3.small"
-      relay_instance_type:
-        type: string
-        description: server-4 instance type
+        description: server-1/3/4 instance type
         default: "t3.small"
       enable_compute_monitor:
         type: boolean
@@ -80,10 +76,6 @@ on:
         type: string
         description: Enclave CID for VSOCK connections
         default: "16"
-      gateway_port:
-        type: string
-        description: Gateway port on server-1 (relay upstream)
-        default: "3200"
       enable_ohttp:
         type: boolean
         description: Enable oHTTP config in server-3 (requires relay URLs and seeds)
@@ -116,10 +108,10 @@ jobs:
       RESOLVED_AUTH_SECURITY_GROUP_ID: ${{ inputs.auth_security_group_id != '' && inputs.auth_security_group_id || vars.OPENPCC_AUTH_SECURITY_GROUP_ID }}
       RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
       RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
+      RESOLVED_ENABLE_SERVER3: ${{ inputs.enable_server3 }}
       RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
-      RESOLVED_ROUTER_INSTANCE_TYPE: ${{ inputs.router_instance_type }}
-      RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
-      RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3200' }}
+      RESOLVED_EDGE_INSTANCE_TYPE: ${{ inputs.edge_instance_type }}
+      RESOLVED_GATEWAY_PORT: "3200"
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ vars.OPENPCC_OHTTP_SEEDS_SECRET_REF != '' && vars.OPENPCC_OHTTP_SEEDS_SECRET_REF || '' }}
       RESOLVED_ENABLE_OHTTP: ${{ inputs.enable_ohttp }}
       RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ inputs.enable_real_attestation_for_client }}
@@ -132,6 +124,7 @@ jobs:
     steps:
       - name: Preflight validate config inputs
         env:
+          ENABLE_SERVER3: ${{ env.RESOLVED_ENABLE_SERVER3 }}
           ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
           ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
           ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2 }}
@@ -171,6 +164,7 @@ jobs:
                   raise SystemExit(f"{name} must be a {expected_type.__name__} JSON value")
               return data
 
+          enable_server3 = parse_bool(os.getenv("ENABLE_SERVER3"), "ENABLE_SERVER3", True)
           enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", False)
           enable_real = parse_bool(
               os.getenv("ENABLE_REAL_ATTESTATION_FOR_CLIENT"),
@@ -189,7 +183,7 @@ jobs:
                   "enable_real_attestation_for_client=true. Disable one of them."
               )
 
-          if enable_ohttp:
+          if enable_server3 and enable_ohttp:
               relay_raw = os.getenv("RELAY_URLS_JSON", "")
               seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
               seeds_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "")
@@ -220,13 +214,13 @@ jobs:
           att_policy_id = os.getenv("ATTESTATION_POLICY_ID", "")
           allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
           hints_raw = os.getenv("ATTESTATION_VERIFIER_HINTS_JSON", "")
-          if enable_real:
+          if enable_server3 and enable_real:
               require("OPENPCC_ATTESTATION_POLICY_ID", att_policy_id)
               require("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw)
               require("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw)
               parse_json("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw, dict)
               parse_json("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw, dict)
-          else:
+          elif enable_server3:
               if (
                   str(att_policy_id).strip()
                   or str(allowed_raw).strip()
@@ -256,6 +250,7 @@ jobs:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           ROUTER_IMAGE_NAME: openpcc-router
           AUTH_IMAGE_NAME: ${{ env.SERVER3_IMAGE_NAME }}
+          ENABLE_SERVER3: ${{ env.RESOLVED_ENABLE_SERVER3 }}
         run: |
           set -euo pipefail
           ensure_repo() {
@@ -268,7 +263,11 @@ jobs:
             fi
           }
           ensure_repo "${ROUTER_IMAGE_NAME}"
-          ensure_repo "${AUTH_IMAGE_NAME}"
+          if [[ "${ENABLE_SERVER3}" == "true" ]]; then
+            ensure_repo "${AUTH_IMAGE_NAME}"
+          else
+            echo "server-3 disabled; skipping auth repository creation."
+          fi
 
       - name: Validate stage A inputs
         run: |
@@ -286,7 +285,6 @@ jobs:
           require "router_security_group_id" "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
           require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
           require "ami_id" "${RESOLVED_AMI_ID}"
-          require "gateway_port" "${RESOLVED_GATEWAY_PORT}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -300,7 +298,7 @@ jobs:
         run: bash scripts/build_pack.sh
 
       - name: Build server-3 image (if present)
-        if: ${{ hashFiles('server-3/Dockerfile') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('server-3/Dockerfile') != '' }}
         env:
           COMPONENT: server-3
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
@@ -310,7 +308,11 @@ jobs:
         run: bash scripts/build_pack.sh
 
       - name: Skip server-3 build
-        if: ${{ hashFiles('server-3/Dockerfile') == '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 != 'true' }}
+        run: echo "::notice::server-3 build disabled; skipping."
+
+      - name: Skip server-3 build (Dockerfile missing)
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('server-3/Dockerfile') == '' }}
         run: echo "::warning::server-3 Dockerfile not found; skipping build."
 
       - name: Deploy server-1
@@ -324,7 +326,7 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
+          ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_EDGE_INSTANCE_TYPE }}
           # NOTE: Passed through for future gateway key sync. server-1 does not consume yet.
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
         run: bash scripts/deploy_server1.sh
@@ -333,7 +335,7 @@ jobs:
         id: resolve-server1
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
-          GATEWAY_PORT: ${{ env.RESOLVED_GATEWAY_PORT }}
+          GATEWAY_PORT: "3200"
         run: |
           set -euo pipefail
           instance_id=$(aws ec2 describe-instances \
@@ -363,7 +365,7 @@ jobs:
 
       - name: Build server-3 config
         id: build-server3-config
-        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('scripts/deploy_server3.sh') != '' }}
         env:
           ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
           ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
@@ -521,7 +523,7 @@ jobs:
           echo "server3_config_path=${config_path}" >> "${GITHUB_OUTPUT}"
 
       - name: Validate server-3 inputs
-        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('scripts/deploy_server3.sh') != '' }}
         run: |
           set -euo pipefail
           missing=0
@@ -540,7 +542,7 @@ jobs:
           fi
 
       - name: Deploy server-3 (if script present)
-        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('scripts/deploy_server3.sh') != '' }}
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
@@ -550,7 +552,7 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          AUTH_INSTANCE_TYPE: ${{ env.RESOLVED_AUTH_INSTANCE_TYPE }}
+          AUTH_INSTANCE_TYPE: ${{ env.RESOLVED_EDGE_INSTANCE_TYPE }}
           SERVER1_INTERNAL_ADDR: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
           SERVER1_GATEWAY_URL: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
@@ -558,7 +560,11 @@ jobs:
         run: bash scripts/deploy_server3.sh
 
       - name: Skip server-3 deploy
-        if: ${{ hashFiles('scripts/deploy_server3.sh') == '' }}
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 != 'true' }}
+        run: echo "::notice::server-3 deploy disabled; skipping."
+
+      - name: Skip server-3 deploy (script missing)
+        if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('scripts/deploy_server3.sh') == '' }}
         run: echo "::warning::scripts/deploy_server3.sh not found; skipping server-3 deploy."
 
   stage-b:
@@ -577,7 +583,7 @@ jobs:
       RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
       RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
-      RESOLVED_RELAY_INSTANCE_TYPE: ${{ inputs.relay_instance_type }}
+      RESOLVED_EDGE_INSTANCE_TYPE: ${{ inputs.edge_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
       RESOLVED_COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.enable_fake_attestation_for_server2 && 'include_fake_attestation' || '' }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
@@ -724,7 +730,7 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
-          RELAY_INSTANCE_TYPE: ${{ env.RESOLVED_RELAY_INSTANCE_TYPE }}
+          RELAY_INSTANCE_TYPE: ${{ env.RESOLVED_EDGE_INSTANCE_TYPE }}
           RELAY_UPSTREAM_GATEWAY_URL: ${{ env.SERVER1_GATEWAY_URL }}
           SERVER1_INTERNAL_ADDR: ${{ env.SERVER1_INTERNAL_ADDR }}
         run: bash scripts/deploy_server4.sh
