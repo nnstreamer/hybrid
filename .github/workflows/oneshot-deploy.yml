@@ -104,6 +104,34 @@ on:
         type: string
         description: Optional oHTTP seed secret reference (shared for server-1/3)
         default: ""
+      enable_ohttp:
+        type: boolean
+        description: Enable oHTTP config in server-3
+        default: true
+      enable_real_attestation:
+        type: boolean
+        description: Enable real attestation policy in server-3
+        default: true
+      relay_urls_json:
+        type: string
+        description: JSON array of relay URLs for server-3 config
+        default: ""
+      ohttp_seeds_json:
+        type: string
+        description: JSON array of oHTTP seeds for server-3 config
+        default: ""
+      attestation_policy_id:
+        type: string
+        description: Attestation policy ID for server-3 config
+        default: ""
+      attestation_allowed_json:
+        type: string
+        description: JSON object of attestation allowed values
+        default: ""
+      attestation_verifier_hints_json:
+        type: string
+        description: JSON object of attestation verifier hints
+        default: ""
 
 env:
   IMAGE_TAG: ${{ github.sha }}
@@ -135,6 +163,14 @@ jobs:
       RESOLVED_AUTH_INSTANCE_TYPE: ${{ inputs.auth_instance_type }}
       RESOLVED_GATEWAY_PORT: ${{ inputs.gateway_port != '' && inputs.gateway_port || vars.OPENPCC_GATEWAY_PORT || '3200' }}
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ inputs.ohttp_seeds_secret_ref != '' && inputs.ohttp_seeds_secret_ref || vars.OPENPCC_OHTTP_SEEDS_SECRET_REF }}
+      RESOLVED_ENABLE_OHTTP: ${{ inputs.enable_ohttp }}
+      RESOLVED_ENABLE_REAL_ATTESTATION: ${{ inputs.enable_real_attestation }}
+      RESOLVED_ENABLE_FAKE_ATTESTATION: ${{ inputs.enable_fake_attestation }}
+      RESOLVED_RELAY_URLS_JSON: ${{ inputs.relay_urls_json != '' && inputs.relay_urls_json || vars.OPENPCC_RELAY_URLS_JSON || '' }}
+      RESOLVED_OHTTP_SEEDS_JSON: ${{ inputs.ohttp_seeds_json != '' && inputs.ohttp_seeds_json || secrets.OPENPCC_OHTTP_SEEDS_JSON || vars.OPENPCC_OHTTP_SEEDS_JSON || '' }}
+      RESOLVED_ATTESTATION_POLICY_ID: ${{ inputs.attestation_policy_id != '' && inputs.attestation_policy_id || vars.OPENPCC_ATTESTATION_POLICY_ID || '' }}
+      RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ inputs.attestation_allowed_json != '' && inputs.attestation_allowed_json || secrets.OPENPCC_ATTESTATION_ALLOWED_JSON || vars.OPENPCC_ATTESTATION_ALLOWED_JSON || '' }}
+      RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ inputs.attestation_verifier_hints_json != '' && inputs.attestation_verifier_hints_json || secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || vars.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -245,6 +281,157 @@ jobs:
           echo "server1_router_url=${router_url}" >> "${GITHUB_OUTPUT}"
           echo "server1_gateway_url=${gateway_url}" >> "${GITHUB_OUTPUT}"
 
+      - name: Build server-3 config
+        id: build-server3-config
+        if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
+        env:
+          ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
+          ENABLE_REAL_ATTESTATION: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION }}
+          ENABLE_FAKE_ATTESTATION: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION }}
+          RELAY_URLS_JSON: ${{ env.RESOLVED_RELAY_URLS_JSON }}
+          OHTTP_SEEDS_JSON: ${{ env.RESOLVED_OHTTP_SEEDS_JSON }}
+          OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
+          ATTESTATION_POLICY_ID: ${{ env.RESOLVED_ATTESTATION_POLICY_ID }}
+          ATTESTATION_ALLOWED_JSON: ${{ env.RESOLVED_ATTESTATION_ALLOWED_JSON }}
+          ATTESTATION_VERIFIER_HINTS_JSON: ${{ env.RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON }}
+          SERVER1_ROUTER_URL: ${{ steps.resolve-server1.outputs.server1_router_url }}
+          SERVER1_GATEWAY_URL: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
+        run: |
+          set -euo pipefail
+          config_path="${RUNNER_TEMP}/server-3.config.json"
+          python3 - <<'PY' "${config_path}"
+          import json
+          import os
+          import sys
+
+          def parse_bool(value, name, default):
+              if value is None or value.strip() == "":
+                  return default
+              lowered = value.strip().lower()
+              if lowered in ("true", "1", "yes", "y"):
+                  return True
+              if lowered in ("false", "0", "no", "n"):
+                  return False
+              raise SystemExit(f"{name} must be true/false (got '{value}')")
+
+          def parse_json(raw, name, required, expected_type):
+              if raw.strip() == "":
+                  if required:
+                      raise SystemExit(f"{name} is required")
+                  return expected_type()
+              try:
+                  data = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(f"{name} must be valid JSON: {exc}") from exc
+              if not isinstance(data, expected_type):
+                  raise SystemExit(f"{name} must be a {expected_type.__name__} JSON value")
+              return data
+
+          def ensure_non_empty_list(values, name):
+              if not values:
+                  raise SystemExit(f"{name} must be a non-empty list")
+              for idx, item in enumerate(values):
+                  if not isinstance(item, str) or not item.strip():
+                      raise SystemExit(f"{name}[{idx}] must be a non-empty string")
+
+          enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", True)
+          enable_real_attestation = parse_bool(
+              os.getenv("ENABLE_REAL_ATTESTATION"), "ENABLE_REAL_ATTESTATION", True
+          )
+          enable_fake_attestation = parse_bool(
+              os.getenv("ENABLE_FAKE_ATTESTATION"), "ENABLE_FAKE_ATTESTATION", False
+          )
+
+          if enable_fake_attestation and enable_real_attestation:
+              raise SystemExit(
+                  "enable_fake_attestation=true is not consistent with real attestation policy. "
+                  "Disable real attestation or fake attestation."
+              )
+
+          server1_router_url = os.getenv("SERVER1_ROUTER_URL", "").strip()
+          server1_gateway_url = os.getenv("SERVER1_GATEWAY_URL", "").strip()
+          relay_urls_raw = os.getenv("RELAY_URLS_JSON", "")
+          seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
+          seeds_secret_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "").strip()
+
+          if enable_ohttp:
+              if not server1_router_url or not server1_gateway_url:
+                  raise SystemExit("SERVER1_ROUTER_URL and SERVER1_GATEWAY_URL are required for oHTTP")
+              relay_urls = parse_json(relay_urls_raw, "relay_urls_json", True, list)
+              ensure_non_empty_list(relay_urls, "relay_urls_json")
+              seeds = parse_json(seeds_raw, "ohttp_seeds_json", True, list)
+              if not seeds:
+                  raise SystemExit("ohttp_seeds_json must be a non-empty list")
+              if not seeds_secret_ref:
+                  raise SystemExit("ohttp_seeds_secret_ref is required when oHTTP is enabled")
+              seen_ids = set()
+              for idx, seed in enumerate(seeds):
+                  if not isinstance(seed, dict):
+                      raise SystemExit(f"ohttp_seeds_json[{idx}] must be an object")
+                  for key in ("key_id", "seed_hex", "active_from", "active_until"):
+                      value = seed.get(key)
+                      if not isinstance(value, str) or not value.strip():
+                          raise SystemExit(f"ohttp_seeds_json[{idx}].{key} must be a non-empty string")
+                  key_id = seed["key_id"]
+                  if key_id in seen_ids:
+                      raise SystemExit(f"ohttp_seeds_json[{idx}].key_id is duplicated: {key_id}")
+                  seen_ids.add(key_id)
+          else:
+              if relay_urls_raw.strip() or seeds_raw.strip() or seeds_secret_ref:
+                  raise SystemExit("oHTTP inputs provided but enable_ohttp=false")
+              relay_urls = []
+              seeds = []
+
+          att_policy_id = os.getenv("ATTESTATION_POLICY_ID", "").strip()
+          allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
+          verifier_hints_raw = os.getenv("ATTESTATION_VERIFIER_HINTS_JSON", "")
+
+          if enable_real_attestation:
+              if not att_policy_id:
+                  raise SystemExit("attestation_policy_id is required when real attestation is enabled")
+              allowed = parse_json(allowed_raw, "attestation_allowed_json", False, dict)
+              verifier_hints = parse_json(
+                  verifier_hints_raw, "attestation_verifier_hints_json", False, dict
+              )
+          else:
+              if att_policy_id or allowed_raw.strip() or verifier_hints_raw.strip():
+                  raise SystemExit("attestation inputs provided but enable_real_attestation=false")
+              allowed = {}
+              verifier_hints = {}
+
+          payload = {
+              "version": "0.002",
+              "features": {
+                  "ohttp": enable_ohttp,
+                  "real_attestation": enable_real_attestation,
+              },
+          }
+
+          if enable_ohttp:
+              payload.update(
+                  {
+                      "relay_urls": relay_urls,
+                      "gateway_url": server1_gateway_url,
+                      "router_url": server1_router_url,
+                      "ohttp_seeds": seeds,
+                  }
+              )
+
+          if enable_real_attestation:
+              attestation = {
+                  "policy_id": att_policy_id,
+              }
+              if allowed:
+                  attestation["allowed"] = allowed
+              if verifier_hints:
+                  attestation["verifier_hints"] = verifier_hints
+              payload["attestation"] = attestation
+
+          with open(sys.argv[1], "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, ensure_ascii=True, indent=2)
+          PY
+          echo "server3_config_path=${config_path}" >> "${GITHUB_OUTPUT}"
+
       - name: Validate server-3 inputs
         if: ${{ hashFiles('scripts/deploy_server3.sh') != '' }}
         run: |
@@ -283,6 +470,7 @@ jobs:
           SERVER1_INTERNAL_ADDR: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
           SERVER1_GATEWAY_URL: ${{ steps.resolve-server1.outputs.server1_gateway_url }}
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
+          SERVER3_CONFIG_PATH: ${{ steps.build-server3-config.outputs.server3_config_path }}
         run: bash scripts/deploy_server3.sh
 
       - name: Skip server-3 deploy

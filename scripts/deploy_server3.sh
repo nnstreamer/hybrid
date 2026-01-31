@@ -2,10 +2,10 @@
 # Objective: Deploy OpenPCC server-3 (auth) to AWS EC2.
 # Usage examples:
 # - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... AUTH_SECURITY_GROUP_ID=... \
-#   INSTANCE_PROFILE_ARN=... AMI_ID=... SERVER3_CONFIG_JSON='{}' ./scripts/deploy_server3.sh
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... AUTH_SECURITY_GROUP_ID=... \
-#   INSTANCE_PROFILE_ARN=... AUTH_AMI_ID=... SERVER3_CONFIG_PATH=server-3/config/server-3.sample.json \
+#   INSTANCE_PROFILE_ARN=... AMI_ID=... SERVER3_CONFIG_PATH=server-3/config/server-3.sample.json \
 #   ./scripts/deploy_server3.sh
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... AUTH_SECURITY_GROUP_ID=... \
+#   INSTANCE_PROFILE_ARN=... AUTH_AMI_ID=... ./scripts/deploy_server3.sh /path/to/server-3.json
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -28,8 +28,34 @@ AUTH_INSTANCE_TYPE="${AUTH_INSTANCE_TYPE:-t3.small}"
 SERVER3_PORT="${SERVER3_PORT:-8080}"
 SERVER3_BIND_ADDR="${SERVER3_BIND_ADDR:-0.0.0.0}"
 SERVER3_LOG_LEVEL="${SERVER3_LOG_LEVEL:-INFO}"
-SERVER3_CONFIG_JSON="${SERVER3_CONFIG_JSON:-}"
 SERVER3_CONFIG_PATH="${SERVER3_CONFIG_PATH:-}"
+SERVER3_CONFIG_ARG=""
+
+usage() {
+  echo "Usage: $0 [server-3-config.json]" >&2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --config|-c)
+      shift
+      if [[ $# -eq 0 || -z "${1:-}" ]]; then
+        echo "Missing value for --config/-c" >&2
+        usage
+        exit 1
+      fi
+      SERVER3_CONFIG_ARG="$1"
+      ;;
+    *)
+      SERVER3_CONFIG_ARG="$1"
+      ;;
+  esac
+  shift || true
+done
 
 require_env() {
   local name="$1"
@@ -50,19 +76,42 @@ if [[ -z "${AUTH_AMI_ID}" ]]; then
   exit 1
 fi
 
-if [[ -z "${SERVER3_CONFIG_JSON}" ]]; then
-  if [[ -z "${SERVER3_CONFIG_PATH}" ]]; then
-    echo "Missing required config: set SERVER3_CONFIG_JSON or SERVER3_CONFIG_PATH" >&2
-    exit 1
-  fi
-  if [[ ! -f "${SERVER3_CONFIG_PATH}" ]]; then
-    echo "SERVER3_CONFIG_PATH not found: ${SERVER3_CONFIG_PATH}" >&2
-    exit 1
-  fi
-  SERVER3_CONFIG_JSON="$(cat "${SERVER3_CONFIG_PATH}")"
+if [[ -n "${SERVER3_CONFIG_ARG}" ]]; then
+  SERVER3_CONFIG_PATH="${SERVER3_CONFIG_ARG}"
 fi
 
-config_b64="$(printf '%s' "${SERVER3_CONFIG_JSON}" | base64 | tr -d '\n')"
+if [[ -z "${SERVER3_CONFIG_PATH}" ]]; then
+  echo "Missing required config: pass server-3 JSON file path (arg or SERVER3_CONFIG_PATH)" >&2
+  usage
+  exit 1
+fi
+
+if [[ ! -f "${SERVER3_CONFIG_PATH}" ]]; then
+  echo "SERVER3_CONFIG_PATH not found: ${SERVER3_CONFIG_PATH}" >&2
+  exit 1
+fi
+
+python3 - <<'PY' "${SERVER3_CONFIG_PATH}"
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+except FileNotFoundError:
+    print(f"server-3 config file not found: {path}", file=sys.stderr)
+    sys.exit(1)
+except json.JSONDecodeError as exc:
+    print(f"server-3 config file is not valid JSON: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+if not isinstance(payload, dict):
+    print("server-3 config JSON must be an object", file=sys.stderr)
+    sys.exit(1)
+PY
+
+config_b64="$(base64 -w 0 "${SERVER3_CONFIG_PATH}")"
 
 auth_image_uri="${ECR_REGISTRY}/${AUTH_IMAGE_NAME}:${IMAGE_TAG}"
 
