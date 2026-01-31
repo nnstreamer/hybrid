@@ -261,6 +261,15 @@ PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
   장애 시 캐시/폴백 전략도 문서화해야 한다.
 
 
+## Known Issues (v0.002)
+
+- `server-1`의 mem-gateway는 upstream(openpcc) `cmd/mem-gateway` 구현을 그대로 사용한다.
+  - 해당 구현에는 `BankURL = "http://localhost:3500"` 하드코딩이 존재한다.
+  - v0.002 범위에서는 credit/bank 플로우가 out of scope이므로 변경하지 않는다.
+  - 향후 credit 관련 문제가 생기면 **gateway의 BankURL(3500)** 과
+    **credithole 기본 포트(3501)** 정합 여부를 우선 확인한다.
+
+
 ## 용어(Glossary)
 
 - oHTTP Relay: 제3자가 운영하는 프록시, 사용자 식별 메타데이터는 볼 수 있으나 내용은 복호화 불가
