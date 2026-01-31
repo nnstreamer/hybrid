@@ -214,7 +214,7 @@ jobs:
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
           # NOTE: Passed through for future gateway key sync. server-1 does not consume yet.
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
-        run: bash scripts/deploy.sh
+        run: bash scripts/deploy_server1.sh
 
       - name: Resolve server-1 address
         id: resolve-server1
@@ -432,7 +432,7 @@ jobs:
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
           TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
           TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
-        run: bash scripts/deploy.sh
+        run: bash scripts/deploy_server2.sh
 
       - name: Deploy server-4 (if script present)
         if: ${{ hashFiles('scripts/deploy_server4.sh') != '' }}

@@ -202,21 +202,61 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Deploy
+      - name: Deploy server-1
+        if: ${{ inputs.component == 'server-1' || inputs.component == 'all' }}
         env:
-          COMPONENT: ${{ inputs.component }}
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
           ROUTER_SECURITY_GROUP_ID: ${{ env.RESOLVED_ROUTER_SECURITY_GROUP_ID }}
-          COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
           ROUTER_AMI_ID: ${{ env.RESOLVED_ROUTER_AMI_ID }}
-          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_ROUTER_INSTANCE_TYPE }}
+        run: bash scripts/deploy_server1.sh
+
+      - name: Resolve router address
+        if: ${{ inputs.component == 'all' }}
+        id: resolve-router
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          instance_id=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=openpcc-router" "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].InstanceId | [0]" \
+            --output text)
+          if [ -z "${instance_id}" ] || [ "${instance_id}" = "None" ]; then
+            echo "Failed to find running server-1 instance (tag Name=openpcc-router)." >&2
+            exit 1
+          fi
+          private_ip=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --instance-ids "${instance_id}" \
+            --query "Reservations[0].Instances[0].PrivateIpAddress" \
+            --output text)
+          if [ -z "${private_ip}" ] || [ "${private_ip}" = "None" ]; then
+            echo "Failed to resolve router private IP." >&2
+            exit 1
+          fi
+          router_address="http://${private_ip}:3600"
+          echo "router_address=${router_address}" >> "${GITHUB_OUTPUT}"
+
+      - name: Deploy server-2 (component=server-2)
+        if: ${{ inputs.component == 'server-2' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.RESOLVED_ROUTER_ADDRESS }}
@@ -227,8 +267,31 @@ jobs:
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
           TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
           TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
-          # NOTE: Gateway(3200) is not launched yet. Add gateway setup here later.
-        run: bash scripts/deploy.sh
+        run: bash scripts/deploy_server2.sh
+
+      - name: Deploy server-2 (component=all)
+        if: ${{ inputs.component == 'all' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
+          COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+          KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
+          COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
+          ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
+          ROUTER_ADDRESS: ${{ env.RESOLVED_ROUTER_ADDRESS != '' && env.RESOLVED_ROUTER_ADDRESS || steps.resolve-router.outputs.router_address }}
+          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
+          ALLOW_PREBUILT_EIF: ${{ inputs.allow_prebuilt_eif }}
+          ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
+          ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
+          ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
+          TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
+          TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
+        run: bash scripts/deploy_server2.sh
 
       - name: Persist deploy defaults
         env:
