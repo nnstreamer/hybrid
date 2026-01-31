@@ -96,14 +96,6 @@ on:
         type: string
         description: Enclave CID for VSOCK connections
         default: "16"
-      tpm_simulator_cmd_port:
-        type: string
-        description: TPM simulator command port
-        default: "2321"
-      tpm_simulator_platform_port:
-        type: string
-        description: TPM simulator platform port (cmd+1)
-        default: "2322"
       gateway_port:
         type: string
         description: Gateway port on server-1 (relay upstream)
@@ -324,8 +316,8 @@ jobs:
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
       RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
-      RESOLVED_TPM_SIMULATOR_CMD_PORT: ${{ inputs.tpm_simulator_cmd_port != '' && inputs.tpm_simulator_cmd_port || vars.OPENPCC_TPM_SIMULATOR_CMD_PORT || '2321' }}
-      RESOLVED_TPM_SIMULATOR_PLATFORM_PORT: ${{ inputs.tpm_simulator_platform_port != '' && inputs.tpm_simulator_platform_port || vars.OPENPCC_TPM_SIMULATOR_PLATFORM_PORT || '2322' }}
+      RESOLVED_TPM_SIMULATOR_CMD_PORT: "2321"
+      RESOLVED_TPM_SIMULATOR_PLATFORM_PORT: "2322"
       SERVER1_INTERNAL_ADDR: ${{ needs.stage-a.outputs.server1_internal_addr }}
       SERVER1_ROUTER_URL: ${{ needs.stage-a.outputs.server1_router_url }}
       SERVER1_GATEWAY_URL: ${{ needs.stage-a.outputs.server1_gateway_url }}
