@@ -80,6 +80,10 @@ on:
         type: boolean
         description: Install compute monitor on server-2 (debug only)
         default: true
+      enable_fake_attestation:
+        type: boolean
+        description: Build compute_boot with fake attestation
+        default: false
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
@@ -316,6 +320,7 @@ jobs:
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
       RESOLVED_RELAY_INSTANCE_TYPE: ${{ inputs.relay_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
+      RESOLVED_COMPUTE_BOOT_BUILD_TAGS: ${{ inputs.enable_fake_attestation && 'include_fake_attestation' || '' }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
       RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
@@ -371,6 +376,7 @@ jobs:
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
           PUSH: "true"
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          COMPUTE_BOOT_BUILD_TAGS: ${{ env.RESOLVED_COMPUTE_BOOT_BUILD_TAGS }}
         run: bash scripts/build_pack.sh
 
       - name: Build server-4 image (if present)
