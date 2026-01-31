@@ -251,6 +251,25 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Ensure ECR repositories (server-1/3)
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          ROUTER_IMAGE_NAME: openpcc-router
+          AUTH_IMAGE_NAME: ${{ env.SERVER3_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          ensure_repo() {
+            local name="$1"
+            if ! aws ecr describe-repositories --region "${AWS_REGION}" --repository-names "${name}" >/dev/null 2>&1; then
+              echo "Creating ECR repository: ${name}"
+              aws ecr create-repository --region "${AWS_REGION}" --repository-name "${name}" >/dev/null
+            else
+              echo "ECR repository exists: ${name}"
+            fi
+          }
+          ensure_repo "${ROUTER_IMAGE_NAME}"
+          ensure_repo "${AUTH_IMAGE_NAME}"
+
       - name: Validate stage A inputs
         run: |
           set -euo pipefail
@@ -583,6 +602,25 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repositories (server-2/4)
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          COMPUTE_IMAGE_NAME: openpcc-compute
+          RELAY_IMAGE_NAME: ${{ env.SERVER4_IMAGE_NAME }}
+        run: |
+          set -euo pipefail
+          ensure_repo() {
+            local name="$1"
+            if ! aws ecr describe-repositories --region "${AWS_REGION}" --repository-names "${name}" >/dev/null 2>&1; then
+              echo "Creating ECR repository: ${name}"
+              aws ecr create-repository --region "${AWS_REGION}" --repository-name "${name}" >/dev/null
+            else
+              echo "ECR repository exists: ${name}"
+            fi
+          }
+          ensure_repo "${COMPUTE_IMAGE_NAME}"
+          ensure_repo "${RELAY_IMAGE_NAME}"
 
       - name: Validate stage B inputs
         run: |
