@@ -1,40 +1,64 @@
 {
+  "__comment_version": "Config schema version for clients.",
   "version": "0.002",
+  "__comment_features": "Feature flags that control which sections are required.",
   "features": {
+    "__comment_ohttp": "Enable oHTTP relay/gateway configuration.",
     "ohttp": true,
+    "__comment_real_attestation": "Enable real attestation policy distribution.",
     "real_attestation": true
   },
+  "__comment_relay_urls": "List of relay endpoints that clients use for oHTTP.",
   "relay_urls": [
     "https://relay.example.com/ohttp"
   ],
-  "gateway_url": "http://10.0.1.23/",
+  "__comment_gateway_url": "server-1 gateway base URL (oHTTP upstream).",
+  "gateway_url": "http://10.0.1.23:3200/",
+  "__comment_router_url": "server-1 router base URL (compute routing).",
   "router_url": "http://10.0.1.23:3600/",
+  "__comment_ohttp_seeds": "Seed list for deterministic oHTTP public key config.",
   "ohttp_seeds": [
     {
+      "__comment_key_id": "Short key identifier used by clients.",
       "key_id": "01",
+      "__comment_seed_hex": "Hex-encoded seed for deterministic key derivation.",
       "seed_hex": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+      "__comment_active_from": "ISO-8601 timestamp when this key becomes active.",
       "active_from": "2026-01-30T00:00:00Z",
+      "__comment_active_until": "ISO-8601 timestamp when this key expires.",
       "active_until": "2026-02-06T00:00:00Z"
     },
     {
+      "__comment_key_id": "Short key identifier used by clients.",
       "key_id": "02",
+      "__comment_seed_hex": "Hex-encoded seed for deterministic key derivation.",
       "seed_hex": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+      "__comment_active_from": "ISO-8601 timestamp when this key becomes active.",
       "active_from": "2026-02-06T00:00:00Z",
+      "__comment_active_until": "ISO-8601 timestamp when this key expires.",
       "active_until": "2026-02-13T00:00:00Z"
     }
   ],
+  "__comment_attestation": "Real attestation policy configuration for clients.",
   "attestation": {
+    "__comment_policy_id": "Policy version/identifier used by clients.",
     "policy_id": "policy-2026-01-30",
+    "__comment_allowed": "Allowed measurement values for verification.",
     "allowed": {
+      "__comment_image_hashes": "Accepted image hashes (sha256).",
       "image_hashes": [
         "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       ],
+      "__comment_tpm_rek_hashes": "Accepted TPM REK hashes (sha256).",
       "tpm_rek_hashes": [
         "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       ]
     },
+    "__comment_verifier_hints": "Hints for client verifier selection.",
     "verifier_hints": {
+      "__comment_type": "Verifier implementation hint.",
       "type": "aws-nitro",
+      "__comment_mode": "Verifier mode hint.",
       "mode": "default"
     }
   }
