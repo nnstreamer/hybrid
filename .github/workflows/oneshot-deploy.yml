@@ -185,15 +185,12 @@ jobs:
       - name: Build server-3 image (if present)
         if: ${{ hashFiles('server-3/Dockerfile') != '' }}
         env:
+          COMPONENT: server-3
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          PUSH: "true"
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          SERVER3_IMAGE_NAME: ${{ env.SERVER3_IMAGE_NAME }}
-        run: |
-          set -euo pipefail
-          image="${REGISTRY}/${SERVER3_IMAGE_NAME}:${IMAGE_TAG}"
-          echo "Building ${image} from server-3/Dockerfile"
-          docker build -f server-3/Dockerfile -t "${image}" server-3
-          docker push "${image}"
+          AUTH_IMAGE_NAME: ${{ env.SERVER3_IMAGE_NAME }}
+        run: bash scripts/build_pack.sh
 
       - name: Skip server-3 build
         if: ${{ hashFiles('server-3/Dockerfile') == '' }}
