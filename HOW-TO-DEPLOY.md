@@ -9,9 +9,9 @@
 
 - [ ] AWS 계정 준비
 - [ ] GitHub Actions Secrets에 AWS 키 저장
-- [ ] ECR 리포지토리 생성
+- [ ] 공개 레지스트리(ECR Public 등) 준비
 - [ ] VPC Subnet, Security Group 준비 (router/compute 분리 권장)
-- [ ] EC2 Instance Profile(역할) 준비
+- [ ] (선택) EC2 Instance Profile(역할) 준비
 - [ ] AMI ID(예: Ubuntu 22.04) 결정
 - [ ] (선택) EIF 자동화를 위한 self-hosted runner 준비
 - [ ] GitHub Actions에서 Build/Deploy 워크플로 실행
@@ -32,9 +32,9 @@
 배포에는 대략 다음 권한이 필요합니다:
 
 - EC2 인스턴스 생성 (`ec2:RunInstances`, `ec2:CreateTags`)
-- ECR 로그인/이미지 조회
-- (선택) S3에서 EIF 다운로드
-- 인스턴스에 역할을 부착하기 위한 `iam:PassRole`
+- 공개 레지스트리(ECR Public 등) 푸시/조회 권한
+- (선택) build-pack에서 EIF를 S3에 올릴 때의 S3 권한
+- (선택) Instance Profile을 부착할 때의 `iam:PassRole`
 
 ### 1-3. GitHub Secrets 등록
 
@@ -47,9 +47,9 @@ GitHub 리포지토리 → Settings → Secrets and variables → Actions 에 �
 
 ---
 
-## 2) ECR 리포지토리 생성
+## 2) 공개 레지스트리 준비 (ECR Public 권장)
 
-이미지 빌드/푸시 및 배포를 위해 ECR이 필요합니다.
+이미지 빌드/푸시 및 배포를 위해 **로그인 없이 pull 가능한 공개 레지스트리**가 필요합니다.
 
 ### 2-1. ECR 리포지토리 이름
 
@@ -59,7 +59,7 @@ GitHub 리포지토리 → Settings → Secrets and variables → Actions 에 �
 - `openpcc-compute`
 - `openpcc-client` (선택)
 
-### 2-2. ECR 생성 방법
+### 2-2. ECR Public 생성 방법
 
 AWS 콘솔 → ECR → Create repository
 
@@ -82,9 +82,10 @@ AWS 콘솔 → ECR → Create repository
 
 ---
 
-## 4) EC2 Instance Profile(역할) 준비
+## 4) EC2 Instance Profile(역할) 준비 (선택)
 
-EC2 인스턴스가 ECR 및 S3에 접근하려면 Instance Profile(역할)이 필요합니다.
+현재 배포 스크립트는 인스턴스 내부에서 AWS API를 호출하지 않으므로 기본적으로 필요하지 않습니다.  
+Secrets Manager 등 **인스턴스에서 AWS API를 사용해야 할 때만** 준비하세요.
 
 ### 4-1. IAM Role 생성
 
@@ -166,26 +167,21 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 - `subnet_id`
 - `router_security_group_id`
 - `compute_security_group_id`
-- `instance_profile_arn`
 - `ami_id` (또는 router/compute 전용 AMI)
+- `image_registry` (공개 레지스트리 기본값, 예: `public.ecr.aws/alias`)
 
 ### 7-2. 선택 입력값
 
+- `instance_profile_arn` (인스턴스에서 AWS API를 사용할 때만 필요)
 - `key_name` (EC2 SSH 키, 필요 시)
 - `router_address` (Router 주소를 직접 지정할 때 사용)
-- `compute_eif_s3_uri` (S3의 EIF 경로, **사전 빌드 EIF 사용 시에만**)
-- `allow_prebuilt_eif` (`compute_eif_s3_uri`를 그대로 사용할지 여부)
-- `build_eif` (EIF를 self-hosted runner에서 자동 생성, **레거시/특수 상황용**)
 - `enclave_cid` (기본값: 16, VSOCK용 Enclave CID)
 - `tpm_simulator_cmd_port` (기본값: 2321, TPM 시뮬레이터 CMD 포트)
 - `tpm_simulator_platform_port` (기본값: 2322, TPM 시뮬레이터 PLATFORM 포트)
 - 인스턴스 타입 변경
 
-> **A 방식(배포 단계 EIF 생성)**에서는 `build_eif=false`, `compute_eif_s3_uri`는 비워두는 것을 권장합니다.  
-> 이 경우 Compute 호스트가 **Router 주소를 고정한 EIF**를 생성하고 Enclave를 실행합니다.
->
-> `compute_eif_s3_uri`를 사용하려면 **해당 EIF에 Router 주소가 이미 고정**되어 있어야 하며,
-> 이 경우 `allow_prebuilt_eif=true`로 실행합니다.
+> 배포 스크립트는 **ECR 로그인/S3 다운로드를 수행하지 않습니다.**  
+> EIF는 Compute 인스턴스에서 **로컬로 생성**됩니다.
 
 ### 7-2a. OHTTP seed 설정 가이드 (v0.002 준비)
 
@@ -266,13 +262,13 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 - `OPENPCC_COMPUTE_SECURITY_GROUP_ID`
 - `OPENPCC_INSTANCE_PROFILE_ARN`
 - `OPENPCC_ROUTER_ADDRESS`
+- `OPENPCC_IMAGE_REGISTRY`
 - `OPENPCC_KEY_NAME`
 - `OPENPCC_AMI_ID`
 - `OPENPCC_ROUTER_AMI_ID`
 - `OPENPCC_COMPUTE_AMI_ID`
 - `OPENPCC_ROUTER_INSTANCE_TYPE`
 - `OPENPCC_COMPUTE_INSTANCE_TYPE`
-- `OPENPCC_COMPUTE_EIF_S3_URI`
 - `OPENPCC_ENCLAVE_CPU_COUNT`
 - `OPENPCC_ENCLAVE_MEMORY_MIB`
 - `OPENPCC_ENCLAVE_CID`
@@ -324,7 +320,8 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 아니요. **GitHub Secrets에 저장하면 워크플로가 자동으로 사용**합니다.
 
 ### Q2. 왜 Instance Profile이 필요한가요?
-EC2 내부에서 **ECR pull / S3 다운로드**가 필요하기 때문입니다.
+현재 배포 스크립트는 **인스턴스 내부에서 AWS API를 사용하지 않으므로 기본적으로 필요하지 않습니다.**  
+Secrets Manager 등 **AWS API를 인스턴스에서 사용해야 할 때만** Instance Profile을 부여하세요.
 
 ### Q3. EIF는 꼭 필요하나요?
 Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.  
@@ -335,7 +332,7 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 ## 10) 요약
 
 1. AWS 키를 GitHub Secrets에 등록
-2. ECR/네트워크/AMI/Instance Profile 준비
+2. 공개 레지스트리/네트워크/AMI 준비 (필요 시 Instance Profile)
 3. Build/Deploy 워크플로 실행
 
 여기까지 완료하면 GitHub Actions만으로 배포가 가능합니다.
