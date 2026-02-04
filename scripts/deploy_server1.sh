@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Objective: Deploy OpenPCC router (server-1) to AWS EC2.
 # Usage examples:
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... ./scripts/deploy_server1.sh
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... OHTTP_SEEDS_SECRET_REF=... ./scripts/deploy_server1.sh
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... ./scripts/deploy_server1.sh
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... OHTTP_SEEDS_SECRET_REF=... ./scripts/deploy_server1.sh
+# - Optional: INSTANCE_PROFILE_ARN=... KEY_NAME=...
 # Notes:
 # - Requires AWS credentials in the environment.
 set -euo pipefail
@@ -40,8 +41,6 @@ require_env() {
 require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
-require_env INSTANCE_PROFILE_ARN
-
 router_image_uri="${ECR_REGISTRY}/${ROUTER_IMAGE_NAME}:${IMAGE_TAG}"
 
 make_common_args() {
@@ -49,8 +48,11 @@ make_common_args() {
   local args=(
     --subnet-id "${SUBNET_ID}"
     --security-group-ids "${security_group_id}"
-    --iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}"
   )
+
+  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
+    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  fi
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")
@@ -72,9 +74,8 @@ deploy_router() {
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli
+apt-get install -y docker.io
 systemctl enable --now docker
-aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${router_image_uri}"
 # NOTE: Gateway (port 3200) is not launched yet. Add gateway setup here later.
 OHTTP_ENV_ARGS=()

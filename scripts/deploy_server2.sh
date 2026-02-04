@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Objective: Deploy OpenPCC compute node (server-2) to AWS EC2.
 # Usage examples:
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... COMPUTE_SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... ROUTER_ADDRESS=http://10.0.1.10:3600 ./scripts/deploy_server2.sh
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... COMPUTE_SECURITY_GROUP_ID=... INSTANCE_PROFILE_ARN=... AMI_ID=... ROUTER_ADDRESS=http://10.0.1.10:3600 COMPUTE_EIF_S3_URI=s3://bucket/compute.eif ALLOW_PREBUILT_EIF=true ./scripts/deploy_server2.sh
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... COMPUTE_SECURITY_GROUP_ID=... AMI_ID=... ROUTER_ADDRESS=http://10.0.1.10:3600 ./scripts/deploy_server2.sh
+# - Optional: INSTANCE_PROFILE_ARN=... KEY_NAME=...
 # Notes:
 # - Requires AWS credentials in the environment.
 # - Compute instances require Nitro Enclaves enabled instance types.
@@ -27,8 +27,6 @@ COMPUTE_AMI_ID="${COMPUTE_AMI_ID:-${AMI_ID}}"
 COMPUTE_INSTANCE_TYPE="${COMPUTE_INSTANCE_TYPE:-c5.2xlarge}"
 
 ROUTER_ADDRESS="${ROUTER_ADDRESS:-}"
-COMPUTE_EIF_S3_URI="${COMPUTE_EIF_S3_URI:-}"
-ALLOW_PREBUILT_EIF="${ALLOW_PREBUILT_EIF:-false}"
 ENCLAVE_CPU_COUNT="${ENCLAVE_CPU_COUNT:-2}"
 ENCLAVE_MEMORY_MIB="${ENCLAVE_MEMORY_MIB:-2048}"
 ENCLAVE_CID="${ENCLAVE_CID:-16}"
@@ -50,8 +48,6 @@ require_env() {
 require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
-require_env INSTANCE_PROFILE_ARN
-
 compute_image_uri="${ECR_REGISTRY}/${COMPUTE_IMAGE_NAME}:${IMAGE_TAG}"
 
 make_common_args() {
@@ -59,8 +55,11 @@ make_common_args() {
   local args=(
     --subnet-id "${SUBNET_ID}"
     --security-group-ids "${security_group_id}"
-    --iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}"
   )
+
+  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
+    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  fi
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")
@@ -122,19 +121,12 @@ systemctl start nitro-enclaves-allocator.service
 systemctl enable nitro-enclaves-allocator.service
 cd ..
 
-aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
 docker pull "${compute_image_uri}"
 
 EIF_PATH="/opt/openpcc/compute.eif"
 mkdir -p "/opt/openpcc"
 R_ADDRESS="${ROUTER_ADDRESS}"
 R_COM_PORT="${ROUTER_COM_PORT:-8081}"
-
-if [[ -n "${COMPUTE_EIF_S3_URI}" && "${ALLOW_PREBUILT_EIF}" != "true" ]]; then
-  echo "COMPUTE_EIF_S3_URI is set but deploy-time router config baking is enabled." >&2
-  echo "Set ALLOW_PREBUILT_EIF=true to allow prebuilt EIF." >&2
-  exit 1
-fi
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
@@ -308,11 +300,8 @@ fi
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
-if [[ -n "${COMPUTE_EIF_S3_URI}" ]]; then
-  aws s3 cp "${COMPUTE_EIF_S3_URI}" "\${EIF_PATH}"
-else
-  CONFIG_DIR="\$(mktemp -d)"
-  cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
+CONFIG_DIR="\$(mktemp -d)"
+cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
 http:
   port: "\${R_COM_PORT}"
 evidence:
@@ -342,7 +331,7 @@ router_agent:
   router_base_url: "\${R_PROXY_URL}"
 CONFIG_EOF
 
-  cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
+cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
 inference_engine:
   type: \${INFERENCE_ENGINE_TYPE:-ollama}
   skip: \${INFERENCE_ENGINE_SKIP:-false}
@@ -369,15 +358,14 @@ transparency:
   image_sigstore_bundle: "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
 CONFIG_EOF
 
-  cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
+cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
 FROM ${compute_image_uri}
 COPY router_com.yaml /etc/openpcc/router_com.yaml
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
-  docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
-  nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
-  rm -rf "\${CONFIG_DIR}"
-fi
+docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
+nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
+rm -rf "\${CONFIG_DIR}"
 
 mv \$0 /
 reboot now
@@ -390,7 +378,7 @@ script_after_reboot_b64=$(gzip -c "${user_data_after_reboot}" | base64 -w 0)
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io awscli python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip
+apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" <<'INEOF'
 ${script_after_reboot_b64}

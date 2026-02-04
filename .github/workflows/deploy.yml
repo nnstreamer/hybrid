@@ -1,7 +1,7 @@
 # Objective: Deploy OpenPCC router and compute nodes to AWS.
 # Usage examples:
 # - Run workflow_dispatch with component=server-1 and ami_id set
-# - Run workflow_dispatch with component=server-2 and compute_eif_s3_uri set
+# - Run workflow_dispatch with component=server-2 (EIF builds on instance)
 # - Run workflow_dispatch with component=all and required AWS inputs set
 name: OpenPCC Proto 1 Deploy
 
@@ -38,7 +38,11 @@ on:
         default: ""
       instance_profile_arn:
         type: string
-        description: IAM instance profile ARN for EC2
+        description: Optional IAM instance profile ARN for EC2 (leave blank for public registry pulls)
+        default: ""
+      image_registry:
+        type: string
+        description: Public image registry base (e.g., public.ecr.aws/alias) when no instance profile
         default: ""
       key_name:
         type: string
@@ -72,18 +76,6 @@ on:
         type: string
         description: Optional router address override (for compute-only deploys)
         default: ""
-      build_eif:
-        type: boolean
-        description: Build EIF on self-hosted runner and upload to S3
-        default: false
-      compute_eif_s3_uri:
-        type: string
-        description: Optional S3 URI for prebuilt EIF
-        default: ""
-      allow_prebuilt_eif:
-        type: boolean
-        description: Allow using compute_eif_s3_uri as-is
-        default: false
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
@@ -106,62 +98,7 @@ on:
         default: "2322"
 
 jobs:
-  buildeif:
-    if: ${{ inputs.build_eif == true && (inputs.component == 'all' || inputs.component == 'server-2') }}
-    runs-on: [self-hosted, nitro-eif]
-    env:
-      RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
-      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
-    permissions:
-      contents: read
-      id-token: write
-    outputs:
-      compute_eif_s3_uri: ${{ steps.set-output.outputs.compute_eif_s3_uri }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate EIF inputs
-        run: |
-          if [ -z "${RESOLVED_COMPUTE_EIF_S3_URI}" ]; then
-            echo "compute_eif_s3_uri is required when build_eif=true (input or OPENPCC_COMPUTE_EIF_S3_URI)."
-            exit 1
-          fi
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ env.RESOLVED_AWS_REGION }}
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build EIF and upload to S3
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
-        run: |
-          compute_image_uri="${REGISTRY}/openpcc-compute:${IMAGE_TAG}"
-          docker pull "${compute_image_uri}"
-          sudo mkdir -p /opt/openpcc
-          sudo nitro-cli build-enclave --docker-uri "${compute_image_uri}" \
-            --output-file /opt/openpcc/compute.eif
-          aws s3 cp /opt/openpcc/compute.eif "${COMPUTE_EIF_S3_URI}"
-
-      - name: Set outputs
-        id: set-output
-        run: echo "compute_eif_s3_uri=${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}" >> "$GITHUB_OUTPUT"
-
   deploy:
-    needs:
-      - buildeif
-    if: |
-      always() &&
-      (needs.buildeif.result == 'success' || needs.buildeif.result == 'skipped')
     runs-on: ubuntu-latest
     env:
       RESOLVED_AWS_REGION: ${{ inputs.aws_region != '' && inputs.aws_region || vars.OPENPCC_AWS_REGION || 'us-east-1' }}
@@ -177,7 +114,6 @@ jobs:
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type != '' && inputs.compute_instance_type || vars.OPENPCC_COMPUTE_INSTANCE_TYPE || 'c5.2xlarge' }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
       RESOLVED_ROUTER_ADDRESS: ${{ inputs.router_address != '' && inputs.router_address || vars.OPENPCC_ROUTER_ADDRESS }}
-      RESOLVED_COMPUTE_EIF_S3_URI: ${{ inputs.compute_eif_s3_uri != '' && inputs.compute_eif_s3_uri || needs.buildeif.outputs.compute_eif_s3_uri || vars.OPENPCC_COMPUTE_EIF_S3_URI }}
       RESOLVED_ENCLAVE_CPU_COUNT: ${{ inputs.enclave_cpu_count != '' && inputs.enclave_cpu_count || vars.OPENPCC_ENCLAVE_CPU_COUNT || '2' }}
       RESOLVED_ENCLAVE_MEMORY_MIB: ${{ inputs.enclave_memory_mib != '' && inputs.enclave_memory_mib || vars.OPENPCC_ENCLAVE_MEMORY_MIB || '2048' }}
       RESOLVED_ENCLAVE_CID: ${{ inputs.enclave_cid != '' && inputs.enclave_cid || vars.OPENPCC_ENCLAVE_CID || '16' }}
@@ -200,14 +136,48 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
+        if: ${{ inputs.image_registry == '' && vars.OPENPCC_IMAGE_REGISTRY == '' }}
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image registry
+        id: resolve-registry
+        env:
+          INPUT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
+          VAR_IMAGE_REGISTRY: ${{ vars.OPENPCC_IMAGE_REGISTRY }}
+          PRIVATE_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_IMAGE_REGISTRY}" ]; then
+            resolved="${INPUT_IMAGE_REGISTRY}"
+          elif [ -n "${VAR_IMAGE_REGISTRY}" ]; then
+            resolved="${VAR_IMAGE_REGISTRY}"
+          else
+            resolved="${PRIVATE_REGISTRY}"
+          fi
+          echo "IMAGE_REGISTRY=${resolved}" >> "$GITHUB_ENV"
+          if [[ "${resolved}" == public.ecr.aws/* ]]; then
+            echo "IMAGE_REGISTRY_IS_PUBLIC=true" >> "$GITHUB_ENV"
+          else
+            echo "IMAGE_REGISTRY_IS_PUBLIC=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate registry/profile combination
+        env:
+          INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
+        run: |
+          set -euo pipefail
+          IMAGE_REGISTRY_IS_PUBLIC="${IMAGE_REGISTRY_IS_PUBLIC:-false}"
+          if [ -z "${INSTANCE_PROFILE_ARN}" ] && [ "${IMAGE_REGISTRY_IS_PUBLIC}" != "true" ]; then
+            echo "instance_profile_arn is empty; set image_registry to a public registry (public.ecr.aws/alias)." >&2
+            exit 1
+          fi
 
       - name: Deploy server-1
         if: ${{ inputs.component == 'server-1' || inputs.component == 'all' }}
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REGISTRY: ${{ env.IMAGE_REGISTRY }}
           SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
           ROUTER_SECURITY_GROUP_ID: ${{ env.RESOLVED_ROUTER_SECURITY_GROUP_ID }}
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
@@ -250,7 +220,7 @@ jobs:
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REGISTRY: ${{ env.IMAGE_REGISTRY }}
           SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
           COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
@@ -260,8 +230,6 @@ jobs:
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.RESOLVED_ROUTER_ADDRESS }}
-          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
-          ALLOW_PREBUILT_EIF: ${{ inputs.allow_prebuilt_eif }}
           ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
           ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
@@ -274,7 +242,7 @@ jobs:
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
           IMAGE_TAG: ${{ inputs.image_tag != '' && inputs.image_tag || github.sha }}
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REGISTRY: ${{ env.IMAGE_REGISTRY }}
           SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
           COMPUTE_SECURITY_GROUP_ID: ${{ env.RESOLVED_COMPUTE_SECURITY_GROUP_ID }}
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
@@ -284,8 +252,6 @@ jobs:
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.RESOLVED_ROUTER_ADDRESS != '' && env.RESOLVED_ROUTER_ADDRESS || steps.resolve-router.outputs.router_address }}
-          COMPUTE_EIF_S3_URI: ${{ env.RESOLVED_COMPUTE_EIF_S3_URI }}
-          ALLOW_PREBUILT_EIF: ${{ inputs.allow_prebuilt_eif }}
           ENCLAVE_CPU_COUNT: ${{ env.RESOLVED_ENCLAVE_CPU_COUNT }}
           ENCLAVE_MEMORY_MIB: ${{ env.RESOLVED_ENCLAVE_MEMORY_MIB }}
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
@@ -338,7 +304,7 @@ jobs:
           update_var OPENPCC_COMPUTE_AMI_ID "${RESOLVED_COMPUTE_AMI_ID}"
           update_var OPENPCC_ROUTER_INSTANCE_TYPE "${RESOLVED_ROUTER_INSTANCE_TYPE}"
           update_var OPENPCC_COMPUTE_INSTANCE_TYPE "${RESOLVED_COMPUTE_INSTANCE_TYPE}"
-          update_var OPENPCC_COMPUTE_EIF_S3_URI "${RESOLVED_COMPUTE_EIF_S3_URI}"
+          update_var OPENPCC_IMAGE_REGISTRY "${IMAGE_REGISTRY}"
           update_var OPENPCC_ENCLAVE_CPU_COUNT "${RESOLVED_ENCLAVE_CPU_COUNT}"
           update_var OPENPCC_ENCLAVE_MEMORY_MIB "${RESOLVED_ENCLAVE_MEMORY_MIB}"
           update_var OPENPCC_ENCLAVE_CID "${RESOLVED_ENCLAVE_CID}"
