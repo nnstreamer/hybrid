@@ -252,6 +252,15 @@ PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
 `SERVER1_INTERNAL_ADDR`(private IP)를 사용하도록 허용한다.
 이 가정은 임시이며, 다른 네트워크 구성에서는 별도 주소 입력이 필요하다.
 
+## Known Issue & Future Work
+
+- 현재 v0.002는 `server-1`과 `server-3` 간 직접 통신을 요구하지 않는다
+  (server-3는 client에게 config를 제공하고, server-1은 이를 직접 pull하지 않는다).
+- 향후 `server-1`이 `server-3`에서 oHTTP 키/구성 정보를 직접 조회하는 구조로
+  변경될 수 있다. 이 경우 보안그룹/네트워크 규칙을 업데이트해
+  `server-1 -> server-3 (TCP 8080)` 통신을 허용해야 하며,
+  장애 시 캐시/폴백 전략도 문서화해야 한다.
+
 
 ## 용어(Glossary)
 
