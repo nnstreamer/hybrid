@@ -27,8 +27,13 @@ ROUTER_AMI_ID="${ROUTER_AMI_ID:-${AMI_ID}}"
 ROUTER_INSTANCE_TYPE="${ROUTER_INSTANCE_TYPE:-t3.small}"
 
 ROUTER_ADDRESS="${ROUTER_ADDRESS:-}"
-# NOTE: server-1 does not consume this yet; pass-through for future oHTTP key sync.
+# NOTE: If set, this is used to load gateway OHTTP seeds.
 OHTTP_SEEDS_SECRET_REF="${OHTTP_SEEDS_SECRET_REF:-}"
+OHTTP_SEEDS_JSON="${OHTTP_SEEDS_JSON:-}"
+OHTTP_SEEDS_JSON_B64=""
+if [[ -n "${OHTTP_SEEDS_JSON}" ]]; then
+  OHTTP_SEEDS_JSON_B64="$(printf '%s' "${OHTTP_SEEDS_JSON}" | base64 -w 0)"
+fi
 
 require_env() {
   local name="$1"
@@ -82,9 +87,32 @@ systemctl enable --now docker
 docker pull "${router_image_uri}"
 # NOTE: Ensure the router security group allows TCP 3200 (gateway),
 # 3501 (credithole), and 3600 (router).
+set +x
 OHTTP_ENV_ARGS=()
 if [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
-  OHTTP_ENV_ARGS=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")
+  OHTTP_ENV_ARGS+=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")
+fi
+OHTTP_SEEDS_JSON=""
+if [[ -n "${OHTTP_SEEDS_JSON_B64}" ]]; then
+  OHTTP_SEEDS_JSON="\$(printf '%s' "${OHTTP_SEEDS_JSON_B64}" | base64 -d)"
+fi
+if [[ -z "\${OHTTP_SEEDS_JSON}" && -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
+  secret_ref="${OHTTP_SEEDS_SECRET_REF}"
+  if [[ "${secret_ref}" == secretsmanager:* ]]; then
+    secret_ref="\${secret_ref#secretsmanager:}"
+  fi
+  if [[ "${secret_ref}" == arn:* || "${secret_ref}" == *:secret:* ]]; then
+    OHTTP_SEEDS_JSON=\$(aws secretsmanager get-secret-value --region "${AWS_REGION}" --secret-id "\${secret_ref}" --query SecretString --output text)
+  elif [[ "${secret_ref}" == ssm:* ]]; then
+    param_name="\${secret_ref#ssm:}"
+    OHTTP_SEEDS_JSON=\$(aws ssm get-parameter --region "${AWS_REGION}" --with-decryption --name "\${param_name}" --query Parameter.Value --output text)
+  else
+    echo "Unsupported OHTTP_SEEDS_SECRET_REF format: ${OHTTP_SEEDS_SECRET_REF}" >&2
+    exit 1
+  fi
+fi
+if [[ -n "\${OHTTP_SEEDS_JSON}" ]]; then
+  OHTTP_ENV_ARGS+=(-e "OHTTP_SEEDS_JSON=\${OHTTP_SEEDS_JSON}")
 fi
 docker run -d --restart unless-stopped --name openpcc-router -p 3600:3600 -p 3501:3501 -p 3200:3200 "\${OHTTP_ENV_ARGS[@]}" "${router_image_uri}"
 EOF

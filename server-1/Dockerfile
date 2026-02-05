@@ -18,6 +18,8 @@ WORKDIR /src
 ARG OPENPCC_REF=main
 RUN git clone --branch "${OPENPCC_REF}" --depth 1 https://github.com/openpcc/openpcc.git .
 
+COPY mem-gateway/main.go /src/cmd/mem-gateway/main.go
+
 RUN go mod download
 
 RUN go build -o /out/mem-router ./cmd/mem-router

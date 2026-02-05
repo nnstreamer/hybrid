@@ -131,6 +131,11 @@ jobs:
       RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ secrets.OPENPCC_ATTESTATION_ALLOWED_JSON != '' && secrets.OPENPCC_ATTESTATION_ALLOWED_JSON || vars.OPENPCC_ATTESTATION_ALLOWED_JSON || '' }}
       RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON != '' && secrets.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || vars.OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON || '' }}
       RESOLVED_RELAY_SECURITY_GROUP_ID: ${{ inputs.relay_security_group_id != '' && inputs.relay_security_group_id || vars.OPENPCC_RELAY_SECURITY_GROUP_ID }}
+      RESOLVED_RELAY_EIP_ALLOCATION_ID: ${{ vars.OPENPCC_RELAY_EIP_ALLOCATION_ID != '' && vars.OPENPCC_RELAY_EIP_ALLOCATION_ID || '' }}
+      RESOLVED_RELAY_EIP_AUTO_ALLOCATE: ${{ vars.OPENPCC_RELAY_EIP_AUTO_ALLOCATE != '' && vars.OPENPCC_RELAY_EIP_AUTO_ALLOCATE || 'false' }}
+      RESOLVED_RELAY_ROUTE53_ZONE_ID: ${{ vars.OPENPCC_RELAY_ROUTE53_ZONE_ID != '' && vars.OPENPCC_RELAY_ROUTE53_ZONE_ID || '' }}
+      RESOLVED_RELAY_ROUTE53_RECORD_NAME: ${{ vars.OPENPCC_RELAY_ROUTE53_RECORD_NAME != '' && vars.OPENPCC_RELAY_ROUTE53_RECORD_NAME || '' }}
+      RESOLVED_RELAY_ROUTE53_TTL: ${{ vars.OPENPCC_RELAY_ROUTE53_TTL != '' && vars.OPENPCC_RELAY_ROUTE53_TTL || '60' }}
     steps:
       - name: Preflight validate config inputs
         env:
@@ -144,6 +149,11 @@ jobs:
           COMPUTE_SECURITY_GROUP_ID: ${{ inputs.compute_security_group_id != '' && inputs.compute_security_group_id || vars.OPENPCC_COMPUTE_SECURITY_GROUP_ID }}
           AUTH_SECURITY_GROUP_ID: ${{ env.RESOLVED_AUTH_SECURITY_GROUP_ID }}
           RELAY_SECURITY_GROUP_ID: ${{ env.RESOLVED_RELAY_SECURITY_GROUP_ID }}
+          RELAY_EIP_ALLOCATION_ID: ${{ env.RESOLVED_RELAY_EIP_ALLOCATION_ID }}
+          RELAY_EIP_AUTO_ALLOCATE: ${{ env.RESOLVED_RELAY_EIP_AUTO_ALLOCATE }}
+          RELAY_ROUTE53_ZONE_ID: ${{ env.RESOLVED_RELAY_ROUTE53_ZONE_ID }}
+          RELAY_ROUTE53_RECORD_NAME: ${{ env.RESOLVED_RELAY_ROUTE53_RECORD_NAME }}
+          RELAY_ROUTE53_TTL: ${{ env.RESOLVED_RELAY_ROUTE53_TTL }}
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
           IMAGE_REGISTRY_INPUT: ${{ inputs.image_registry }}
@@ -552,8 +562,8 @@ jobs:
           SERVER1_INTERNAL_ADDR: ${{ steps.resolve-server1.outputs.server1_internal_addr }}
         run: bash scripts/deploy_server4.sh
 
-      - name: Resolve server-4 relay URL
-        id: resolve-server4
+      - name: Resolve server-4 instance
+        id: resolve-server4-instance
         if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' }}
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
@@ -578,16 +588,147 @@ jobs:
             --instance-ids "${instance_id}" \
             --query "Reservations[0].Instances[0].PublicIpAddress" \
             --output text)
-          if [ -z "${public_ip}" ] || [ "${public_ip}" = "None" ]; then
-            if [ -z "${private_ip}" ] || [ "${private_ip}" = "None" ]; then
-              echo "Failed to resolve server-4 IP address." >&2
-              exit 1
-            fi
-            echo "::warning::server-4 public IP missing; falling back to private IP."
-            public_ip="${private_ip}"
+          if [ -z "${private_ip}" ] || [ "${private_ip}" = "None" ]; then
+            echo "Failed to resolve server-4 private IP address." >&2
+            exit 1
           fi
-          relay_url="http://${public_ip}:3100"
-          echo "server4_relay_url=${relay_url}" >> "${GITHUB_OUTPUT}"
+          if [ -z "${public_ip}" ] || [ "${public_ip}" = "None" ]; then
+            public_ip=""
+          fi
+          echo "server4_instance_id=${instance_id}" >> "${GITHUB_OUTPUT}"
+          echo "server4_private_ip=${private_ip}" >> "${GITHUB_OUTPUT}"
+          echo "server4_public_ip=${public_ip}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assign relay EIP (optional)
+        id: assign-relay-eip
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          RELAY_EIP_ALLOCATION_ID: ${{ env.RESOLVED_RELAY_EIP_ALLOCATION_ID }}
+          RELAY_EIP_AUTO_ALLOCATE: ${{ env.RESOLVED_RELAY_EIP_AUTO_ALLOCATE }}
+          SERVER4_INSTANCE_ID: ${{ steps.resolve-server4-instance.outputs.server4_instance_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SERVER4_INSTANCE_ID}" ]]; then
+            echo "server-4 instance id missing; cannot associate EIP." >&2
+            exit 1
+          fi
+          allocation_id="${RELAY_EIP_ALLOCATION_ID}"
+          if [[ -z "${allocation_id}" ]]; then
+            if [[ "${RELAY_EIP_AUTO_ALLOCATE}" == "true" ]]; then
+              allocation_id=$(aws ec2 allocate-address --region "${AWS_REGION}" --domain vpc \
+                --query "AllocationId" --output text)
+              if [[ -z "${allocation_id}" || "${allocation_id}" == "None" ]]; then
+                echo "Failed to allocate relay EIP." >&2
+                exit 1
+              fi
+              aws ec2 create-tags --region "${AWS_REGION}" --resources "${allocation_id}" \
+                --tags Key=Name,Value=openpcc-relay-eip >/dev/null
+              echo "Allocated relay EIP: ${allocation_id}"
+            else
+              echo "Relay EIP not configured; skipping EIP association."
+              exit 0
+            fi
+          fi
+          aws ec2 associate-address --region "${AWS_REGION}" \
+            --instance-id "${SERVER4_INSTANCE_ID}" \
+            --allocation-id "${allocation_id}" \
+            --allow-reassociation >/dev/null
+          eip_public_ip=$(aws ec2 describe-addresses --region "${AWS_REGION}" \
+            --allocation-ids "${allocation_id}" \
+            --query "Addresses[0].PublicIp" --output text)
+          if [[ -z "${eip_public_ip}" || "${eip_public_ip}" == "None" ]]; then
+            echo "Failed to resolve relay EIP public IP." >&2
+            exit 1
+          fi
+          echo "relay_eip_allocation_id=${allocation_id}" >> "${GITHUB_OUTPUT}"
+          echo "relay_eip_public_ip=${eip_public_ip}" >> "${GITHUB_OUTPUT}"
+
+      - name: Update relay Route53 (optional)
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' && env.RESOLVED_RELAY_ROUTE53_ZONE_ID != '' && env.RESOLVED_RELAY_ROUTE53_RECORD_NAME != '' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          RELAY_ROUTE53_ZONE_ID: ${{ env.RESOLVED_RELAY_ROUTE53_ZONE_ID }}
+          RELAY_ROUTE53_RECORD_NAME: ${{ env.RESOLVED_RELAY_ROUTE53_RECORD_NAME }}
+          RELAY_ROUTE53_TTL: ${{ env.RESOLVED_RELAY_ROUTE53_TTL }}
+          RELAY_EIP_PUBLIC_IP: ${{ steps.assign-relay-eip.outputs.relay_eip_public_ip }}
+          SERVER4_PUBLIC_IP: ${{ steps.resolve-server4-instance.outputs.server4_public_ip }}
+        run: |
+          set -euo pipefail
+          record_name="${RELAY_ROUTE53_RECORD_NAME}"
+          if [[ "${record_name}" != *.* ]]; then
+            echo "Route53 record name looks invalid: ${record_name}" >&2
+            exit 1
+          fi
+          if [[ "${record_name}" != *"." ]]; then
+            record_name="${record_name}."
+          fi
+          ip="${RELAY_EIP_PUBLIC_IP}"
+          if [[ -z "${ip}" ]]; then
+            ip="${SERVER4_PUBLIC_IP}"
+          fi
+          if [[ -z "${ip}" ]]; then
+            echo "No relay public IP available for Route53 update." >&2
+            exit 1
+          fi
+          ttl="${RELAY_ROUTE53_TTL:-60}"
+          cat > "${RUNNER_TEMP}/relay-route53.json" <<EOF
+          {
+            "Comment": "OpenPCC relay record",
+            "Changes": [
+              {
+                "Action": "UPSERT",
+                "ResourceRecordSet": {
+                  "Name": "${record_name}",
+                  "Type": "A",
+                  "TTL": ${ttl},
+                  "ResourceRecords": [
+                    { "Value": "${ip}" }
+                  ]
+                }
+              }
+            ]
+          }
+          EOF
+          aws route53 change-resource-record-sets \
+            --hosted-zone-id "${RELAY_ROUTE53_ZONE_ID}" \
+            --change-batch "file://${RUNNER_TEMP}/relay-route53.json"
+
+      - name: Resolve server-4 relay URL
+        id: resolve-server4
+        if: ${{ env.RESOLVED_ENABLE_SERVER4 == 'true' && hashFiles('scripts/deploy_server4.sh') != '' }}
+        env:
+          RELAY_ROUTE53_RECORD_NAME: ${{ env.RESOLVED_RELAY_ROUTE53_RECORD_NAME }}
+          RELAY_EIP_PUBLIC_IP: ${{ steps.assign-relay-eip.outputs.relay_eip_public_ip }}
+          SERVER4_PUBLIC_IP: ${{ steps.resolve-server4-instance.outputs.server4_public_ip }}
+          SERVER4_PRIVATE_IP: ${{ steps.resolve-server4-instance.outputs.server4_private_ip }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${RELAY_ROUTE53_RECORD_NAME}" ]]; then
+            record_name="${RELAY_ROUTE53_RECORD_NAME}"
+            record_name="${record_name%.}"
+            relay_url="http://${record_name}:3100"
+            echo "server4_relay_url=${relay_url}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ -n "${RELAY_EIP_PUBLIC_IP}" ]]; then
+            relay_url="http://${RELAY_EIP_PUBLIC_IP}:3100"
+            echo "server4_relay_url=${relay_url}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ -n "${SERVER4_PUBLIC_IP}" ]]; then
+            relay_url="http://${SERVER4_PUBLIC_IP}:3100"
+            echo "server4_relay_url=${relay_url}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          if [[ -n "${SERVER4_PRIVATE_IP}" ]]; then
+            echo "::warning::server-4 public IP missing; using private IP for relay URL."
+            relay_url="http://${SERVER4_PRIVATE_IP}:3100"
+            echo "server4_relay_url=${relay_url}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          echo "Failed to resolve server-4 relay URL." >&2
+          exit 1
 
       - name: Skip server-4 deploy
         if: ${{ env.RESOLVED_ENABLE_SERVER4 != 'true' }}
