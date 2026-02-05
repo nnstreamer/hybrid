@@ -8,7 +8,7 @@
 ## 0) 빠른 체크리스트
 
 - [ ] AWS 계정 준비
-- [ ] GitHub Actions Secrets에 AWS 키 저장
+- [ ] GitHub Actions Secrets에 AWS_ROLE_ARN 저장
 - [ ] 공개 레지스트리(ECR Public 등) 준비
 - [ ] VPC Subnet, Security Group 준비 (router/compute 분리 권장)
 - [ ] (선택) EC2 Instance Profile(역할) 준비
@@ -18,14 +18,18 @@
 
 ---
 
-## 1) GitHub Actions 인증 정보(Access Key) 준비
+## 1) GitHub Actions 인증 정보(OIDC Role) 준비
 
-이 프로젝트의 워크플로는 **AWS Access Key** 방식으로 인증합니다.
+이 프로젝트의 워크플로는 **GitHub Actions OIDC로 AWS 역할을 가정**합니다.  
+Access Key는 사용하지 않습니다.
 
-### 1-1. IAM 사용자 생성
+### 1-1. IAM OIDC Provider 및 Role 생성
 
-1. AWS 콘솔 → IAM → Users → Create user
-2. Programmatic access 사용 가능하도록 Access Key 생성
+1. IAM → Identity providers → `token.actions.githubusercontent.com` 등록
+2. IAM → Roles → Create role → **Web identity**
+   - Provider: `token.actions.githubusercontent.com`
+   - Audience: `sts.amazonaws.com`
+   - (권장) Subject 제한: `repo:nnstreamer/hybrid:ref:refs/heads/*`
 
 ### 1-2. 최소 권한 정책(개념)
 
@@ -36,12 +40,19 @@
 - (선택) build-pack에서 EIF를 S3에 올릴 때의 S3 권한
 - (선택) Instance Profile을 부착할 때의 `iam:PassRole`
 
-### 1-3. GitHub Secrets 등록
+### 1-3. AWS_ROLE_ARN 확인 및 GitHub Secrets 등록
+
+AWS Console:
+- IAM → Roles → (GitHub Actions용 Role 선택) → **ARN**
+
+CLI:
+```bash
+aws iam get-role --role-name <ROLE_NAME> --query Role.Arn --output text
+```
 
 GitHub 리포지토리 → Settings → Secrets and variables → Actions 에 아래를 추가:
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
+- `AWS_ROLE_ARN`
 
 이 값들은 워크플로가 자동으로 사용합니다.
 
@@ -330,7 +341,7 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 ## 9) 자주 묻는 질문(초보자용)
 
 ### Q1. Access Key를 코드에 넣어야 하나요?
-아니요. **GitHub Secrets에 저장하면 워크플로가 자동으로 사용**합니다.
+아니요. **GitHub Secrets에 `AWS_ROLE_ARN`을 등록하면** 워크플로가 자동으로 사용합니다.
 
 ### Q2. 왜 Instance Profile이 필요한가요?
 현재 배포 스크립트는 **인스턴스 내부에서 AWS API를 사용하지 않으므로 기본적으로 필요하지 않습니다.**  
@@ -344,7 +355,7 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 
 ## 10) 요약
 
-1. AWS 키를 GitHub Secrets에 등록
+1. AWS_ROLE_ARN을 GitHub Secrets에 등록
 2. 공개 레지스트리/네트워크/AMI 준비 (필요 시 Instance Profile)
 3. Build/Deploy 워크플로 실행
 
