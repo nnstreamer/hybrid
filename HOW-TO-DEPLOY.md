@@ -37,6 +37,12 @@ Access Key는 사용하지 않습니다.
 
 - EC2 인스턴스 생성 (`ec2:RunInstances`, `ec2:CreateTags`)
 - 공개 레지스트리(ECR Public 등) 푸시/조회 권한
+  - 예: `ecr-public:GetAuthorizationToken`, `ecr-public:CreateRepository`,
+    `ecr-public:DescribeRepositories`, `ecr-public:BatchCheckLayerAvailability`,
+    `ecr-public:InitiateLayerUpload`, `ecr-public:UploadLayerPart`,
+    `ecr-public:CompleteLayerUpload`, `ecr-public:PutImage`
+  - **필수**: `sts:GetServiceBearerToken` (ECR Public 로그인/푸시용)
+  - 간단히는 `AmazonElasticContainerRegistryPublicFullAccess` 사용 가능
 - (선택) build-pack에서 EIF를 S3에 올릴 때의 S3 권한
 - (선택) Instance Profile을 부착할 때의 `iam:PassRole`
 
