@@ -275,6 +275,9 @@ PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
   - v0.002 범위에서는 credit/bank 플로우가 out of scope이므로 변경하지 않는다.
   - 향후 credit 관련 문제가 생기면 **gateway의 BankURL(3500)** 과
     **credithole 기본 포트(3501)** 정합 여부를 우선 확인한다.
+- `server-4` relay는 인스턴스 생성 시 부여되는 public IP를 사용한다.
+  - 고정된 relay URL이 필요하면 EIP/Route53 기반의 안정화가 필요하지만,
+    v0.002에서는 자동화하지 않는다.
 
 
 ## 용어(Glossary)

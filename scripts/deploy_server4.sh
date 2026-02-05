@@ -99,6 +99,7 @@ EOF
     --region "${AWS_REGION}" \
     --image-id "${RELAY_AMI_ID}" \
     --instance-type "${RELAY_INSTANCE_TYPE}" \
+    --associate-public-ip-address \
     --user-data "file://${user_data}" \
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=openpcc-relay}]" \
     --query 'Instances[0].InstanceId' \
