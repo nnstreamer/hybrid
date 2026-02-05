@@ -185,27 +185,40 @@ GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
 
 ### 7-2a. OHTTP seed 설정 가이드 (v0.002 준비)
 
-`one-shot deploy`는 `OHTTP_SEEDS_SECRET_REF`를 `server-1`/`server-3`에 전달하도록 준비되어 있습니다.
-현재 구현은 **이 값을 전달만** 하며, 실제 oHTTP 키 로직 구현 시 **반드시 이 입력을 읽어 사용**해야 합니다.
+`one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
+`OHTTP_SEEDS_SECRET_REF`는 `server-1`/`server-3`에 **전달만** 하며, 현재는 조회 로직이 없습니다.
 
-**입력 방법(둘 중 하나)**
-- 워크플로 입력: `ohttp_seeds_secret_ref`
+**권장 (AWS API 의존성 제거): OHTTP_SEEDS_JSON 직접 입력**
+- GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)
+- 또는 Repository Variables: `OPENPCC_OHTTP_SEEDS_JSON`
+
+예시(JSON 배열):
+```json
+[
+  {
+    "key_id": "01",
+    "seed_hex": "0123456789abcdef...64hex...",
+    "active_from": "2026-01-30T00:00:00Z",
+    "active_until": "2026-07-30T00:00:00Z"
+  }
+]
+```
+
+**참조 방식(OHTTP_SEEDS_SECRET_REF)**
 - Repository Variable: `OPENPCC_OHTTP_SEEDS_SECRET_REF`
 
 #### A) AWS Secrets Manager 사용
 
 1) seed 데이터 준비(예: `ohttp_seeds.json`)
 ```json
-{
-  "OHTTP_KEYS": [
-    {
-      "key_id": 1,
-      "seed_hex": "0123456789abcdef...64hex...",
-      "active_from": "2026-01-30T00:00:00Z",
-      "active_until": "2026-07-30T00:00:00Z"
-    }
-  ]
-}
+[
+  {
+    "key_id": "01",
+    "seed_hex": "0123456789abcdef...64hex...",
+    "active_from": "2026-01-30T00:00:00Z",
+    "active_until": "2026-07-30T00:00:00Z"
+  }
+]
 ```
 
 seed 생성 예시:
