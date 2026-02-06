@@ -208,6 +208,12 @@ jobs:
 
           image_registry = os.getenv("IMAGE_REGISTRY_INPUT", "").strip() or os.getenv("IMAGE_REGISTRY_VAR", "").strip()
           image_registry_is_public = image_registry.startswith("public.ecr.aws/")
+          instance_profile_arn = os.getenv("INSTANCE_PROFILE_ARN", "").strip()
+          if instance_profile_arn and ":instance-profile/" not in instance_profile_arn:
+              raise SystemExit(
+                  "instance_profile_arn must be an IAM instance profile ARN "
+                  "(arn:aws:iam::...:instance-profile/...). Do not use a role ARN."
+              )
 
           require("subnet_id", os.getenv("SUBNET_ID"), "workflow input or OPENPCC_SUBNET_ID")
           require(
@@ -242,7 +248,6 @@ jobs:
           if enable_server3 and enable_ohttp:
               relay_raw = os.getenv("RELAY_URLS_JSON", "")
               seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
-              seeds_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "")
               if relay_raw.strip():
                   relay = parse_json("OPENPCC_RELAY_URLS_JSON", relay_raw, list)
                   if not relay:
@@ -275,11 +280,6 @@ jobs:
                           raise SystemExit(
                               f"OPENPCC_OHTTP_SEEDS_JSON[{idx}].{key} must be a non-empty string"
                           )
-              require(
-                  "OPENPCC_OHTTP_SEEDS_SECRET_REF",
-                  seeds_ref,
-                  "repo variable (required when enable_ohttp=true)",
-              )
 
           att_policy_id = os.getenv("ATTESTATION_POLICY_ID", "")
           allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
@@ -723,7 +723,6 @@ jobs:
           server1_gateway_url = os.getenv("SERVER1_GATEWAY_URL", "").strip()
           relay_urls_raw = os.getenv("RELAY_URLS_JSON", "")
           seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
-          seeds_secret_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "").strip()
 
           if enable_ohttp:
               if not server1_router_url or not server1_gateway_url:
@@ -733,8 +732,6 @@ jobs:
               seeds = parse_json(seeds_raw, "ohttp_seeds_json", True, list)
               if not seeds:
                   raise SystemExit("ohttp_seeds_json must be a non-empty list")
-              if not seeds_secret_ref:
-                  raise SystemExit("ohttp_seeds_secret_ref is required when oHTTP is enabled")
               seen_ids = set()
               for idx, seed in enumerate(seeds):
                   if not isinstance(seed, dict):

@@ -89,14 +89,10 @@ docker pull "${router_image_uri}"
 # 3501 (credithole), and 3600 (router).
 set +x
 OHTTP_ENV_ARGS=()
-if [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
-  OHTTP_ENV_ARGS+=(-e "OHTTP_SEEDS_SECRET_REF=${OHTTP_SEEDS_SECRET_REF}")
-fi
 OHTTP_SEEDS_JSON=""
 if [[ -n "${OHTTP_SEEDS_JSON_B64}" ]]; then
   OHTTP_SEEDS_JSON="\$(printf '%s' "${OHTTP_SEEDS_JSON_B64}" | base64 -d)"
-fi
-if [[ -z "\${OHTTP_SEEDS_JSON}" && -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
+elif [[ -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
   secret_ref="${OHTTP_SEEDS_SECRET_REF}"
   if [[ "\${secret_ref}" == secretsmanager:* ]]; then
     secret_ref="\${secret_ref#secretsmanager:}"
