@@ -131,7 +131,7 @@ flowchart LR
 NOTE: v0.002 one-shot deploy는 oHTTP 키 동기화 입력을 **이미 전달/구성하도록 준비되어 있다**.
 enable 조건 및 입력은 아래와 같다.
 
-- enable 옵션: one-shot deploy에서 `enable_ohttp=true`
+- enable 옵션: one-shot deploy에서 `enable_server3_ohttp_advertise=true`
 - 필수 입력:
   - `OPENPCC_OHTTP_SEEDS_JSON` (seed 목록 JSON)
 - 선택 입력:
@@ -141,7 +141,7 @@ enable 조건 및 입력은 아래와 같다.
   - `server-1` gateway는 `OHTTP_SEEDS_JSON` 환경변수만 읽는다.
     `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 JSON을 조회해 주입할 때만 사용된다.
 
-참고: one-shot deploy 워크플로는 `enable_ohttp=true`일 때
+참고: one-shot deploy 워크플로는 `enable_server3_ohttp_advertise=true`일 때
 `OPENPCC_OHTTP_SEEDS_JSON`이 반드시 존재하도록 사전 검증한다.
 
 주의(명시): 옵션 A는 운영 단순성이 장점이지만, seed가 `server-3`에도 존재할 수 있어 권한 분리 관점이 약해질 수 있다. 따라서 장기적으로 옵션 C로 확장한다.

@@ -84,9 +84,9 @@ on:
         type: string
         description: Enclave CID for VSOCK connections
         default: "16"
-      enable_ohttp:
+      enable_server3_ohttp_advertise:
         type: boolean
-        description: Enable server-3 to advertise relay URLs (requires relay URLs and seeds)
+        description: Enable server-3 to advertise oHTTP relay URLs (requires relay URLs and seeds)
         default: false
       enable_real_attestation_for_client:
         type: boolean
@@ -122,7 +122,7 @@ jobs:
       RESOLVED_EDGE_INSTANCE_TYPE: ${{ inputs.edge_instance_type }}
       RESOLVED_GATEWAY_PORT: "3200"
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ vars.OPENPCC_OHTTP_SEEDS_SECRET_REF != '' && vars.OPENPCC_OHTTP_SEEDS_SECRET_REF || '' }}
-      RESOLVED_ENABLE_OHTTP: ${{ inputs.enable_ohttp }}
+      RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ inputs.enable_server3_ohttp_advertise }}
       RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ inputs.enable_real_attestation_for_client }}
       RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ inputs.enable_fake_attestation_for_server2 }}
       RESOLVED_RELAY_URLS_JSON: ${{ vars.OPENPCC_RELAY_URLS_JSON != '' && vars.OPENPCC_RELAY_URLS_JSON || '' }}
@@ -136,7 +136,7 @@ jobs:
         env:
           ENABLE_SERVER3: ${{ env.RESOLVED_ENABLE_SERVER3 }}
           ENABLE_SERVER4: ${{ env.RESOLVED_ENABLE_SERVER4 }}
-          ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
+          ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE }}
           ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
           ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2 }}
           SUBNET_ID: ${{ env.RESOLVED_SUBNET_ID }}
@@ -188,7 +188,11 @@ jobs:
 
           enable_server3 = parse_bool(os.getenv("ENABLE_SERVER3"), "ENABLE_SERVER3", True)
           enable_server4 = parse_bool(os.getenv("ENABLE_SERVER4"), "ENABLE_SERVER4", True)
-          enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", False)
+          enable_server3_ohttp_advertise = parse_bool(
+              os.getenv("ENABLE_SERVER3_OHTTP_ADVERTISE"),
+              "ENABLE_SERVER3_OHTTP_ADVERTISE",
+              False,
+          )
           enable_real = parse_bool(
               os.getenv("ENABLE_REAL_ATTESTATION_FOR_CLIENT"),
               "ENABLE_REAL_ATTESTATION_FOR_CLIENT",
@@ -245,7 +249,7 @@ jobs:
                       "instance_profile_arn (required unless image_registry is public.ecr.aws/...)"
                   )
 
-          if enable_server3 and enable_ohttp:
+          if enable_server3 and enable_server3_ohttp_advertise:
               relay_raw = os.getenv("RELAY_URLS_JSON", "")
               seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
               seeds_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "")
@@ -266,12 +270,12 @@ jobs:
                   require(
                       "OPENPCC_RELAY_URLS_JSON",
                       relay_raw,
-                      "repo variable (required when enable_ohttp=true and enable_server4=false)",
+                      "repo variable (required when enable_server3_ohttp_advertise=true and enable_server4=false)",
                   )
               require(
                   "OPENPCC_OHTTP_SEEDS_JSON",
                   seeds_raw,
-                  "repo variable/secret (required when enable_ohttp=true)",
+                  "repo variable/secret (required when enable_server3_ohttp_advertise=true)",
               )
               seeds = parse_json("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw, list)
               if not seeds:
@@ -632,13 +636,13 @@ jobs:
         id: resolve-relay-urls
         if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' }}
         env:
-          ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
+          ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE }}
           ENABLE_SERVER4: ${{ env.RESOLVED_ENABLE_SERVER4 }}
           RELAY_URLS_JSON_INPUT: ${{ env.RESOLVED_RELAY_URLS_JSON }}
           SERVER4_RELAY_URL: ${{ steps.resolve-server4.outputs.server4_relay_url }}
         run: |
           set -euo pipefail
-          if [[ "${ENABLE_OHTTP}" != "true" ]]; then
+          if [[ "${ENABLE_SERVER3_OHTTP_ADVERTISE}" != "true" ]]; then
             echo "relay_urls_json=" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -661,7 +665,7 @@ jobs:
         id: build-server3-config
         if: ${{ env.RESOLVED_ENABLE_SERVER3 == 'true' && hashFiles('scripts/deploy_server3.sh') != '' }}
         env:
-          ENABLE_OHTTP: ${{ env.RESOLVED_ENABLE_OHTTP }}
+          ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE }}
           ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT }}
           ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ env.RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2 }}
           RELAY_URLS_JSON: ${{ steps.resolve-relay-urls.outputs.relay_urls_json }}
@@ -710,7 +714,11 @@ jobs:
                   if not isinstance(item, str) or not item.strip():
                       raise SystemExit(f"{name}[{idx}] must be a non-empty string")
 
-          enable_ohttp = parse_bool(os.getenv("ENABLE_OHTTP"), "ENABLE_OHTTP", True)
+          enable_server3_ohttp_advertise = parse_bool(
+              os.getenv("ENABLE_SERVER3_OHTTP_ADVERTISE"),
+              "ENABLE_SERVER3_OHTTP_ADVERTISE",
+              True,
+          )
           enable_real_attestation_for_client = parse_bool(
               os.getenv("ENABLE_REAL_ATTESTATION_FOR_CLIENT"),
               "ENABLE_REAL_ATTESTATION_FOR_CLIENT",
@@ -733,7 +741,7 @@ jobs:
           relay_urls_raw = os.getenv("RELAY_URLS_JSON", "")
           seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
 
-          if enable_ohttp:
+          if enable_server3_ohttp_advertise:
               if not server1_router_url or not server1_gateway_url:
                   raise SystemExit("SERVER1_ROUTER_URL and SERVER1_GATEWAY_URL are required for oHTTP")
               relay_urls = parse_json(relay_urls_raw, "relay_urls_json", True, list)
@@ -755,7 +763,9 @@ jobs:
                   seen_ids.add(key_id)
           else:
               if relay_urls_raw.strip() or seeds_raw.strip() or seeds_secret_ref:
-                  raise SystemExit("oHTTP inputs provided but enable_ohttp=false")
+                  raise SystemExit(
+                      "oHTTP inputs provided but enable_server3_ohttp_advertise=false"
+                  )
               relay_urls = []
               seeds = []
 
@@ -783,12 +793,12 @@ jobs:
           payload = {
               "version": "0.002",
               "features": {
-                  "ohttp": enable_ohttp,
+                  "ohttp": enable_server3_ohttp_advertise,
                   "real_attestation": enable_real_attestation_for_client,
               },
           }
 
-          if enable_ohttp:
+          if enable_server3_ohttp_advertise:
               payload.update(
                   {
                       "relay_urls": relay_urls,

@@ -194,13 +194,13 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `instance_profile_arn` (public ECR + OHTTP_SEEDS_JSON 직접 입력이면 생략 가능)
 - `enable_server3` (server-3 빌드/배포 활성화)
 - `enable_server4` (server-4 빌드/배포 활성화)
-- `enable_ohttp` (server-3 oHTTP config 생성)
+- `enable_server3_ohttp_advertise` (server-3 oHTTP config 광고)
 - `enable_real_attestation_for_client` (client용 real attestation 정책 활성화)
 - `enable_fake_attestation_for_server2` (server-2 fake attestation 빌드)
 - `enable_compute_monitor` (server-2 모니터 설치)
 - `compute_instance_type`, `edge_instance_type`
 - `enclave_cpu_count`, `enclave_memory_mib`, `enclave_cid`
-- `OPENPCC_RELAY_URLS_JSON` (enable_ohttp=true 이면서 server-4를 배포하지 않을 때 필요)
+- `OPENPCC_RELAY_URLS_JSON` (enable_server3_ohttp_advertise=true 이면서 server-4를 배포하지 않을 때 필요)
 
 > `enable_real_attestation_for_client=true`와 `enable_fake_attestation_for_server2=true`는 동시에 사용할 수 없습니다.
 >
@@ -213,7 +213,7 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 **JSON을 조회해 주입할 때만** 사용됩니다
 (gateway 자체는 `OHTTP_SEEDS_JSON`만 읽습니다).
 
-**필수(One-shot deploy에서 enable_ohttp=true): OHTTP_SEEDS_JSON 직접 입력**
+**필수(One-shot deploy에서 enable_server3_ohttp_advertise=true): OHTTP_SEEDS_JSON 직접 입력**
 - GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)
 - 또는 Repository Variables: `OPENPCC_OHTTP_SEEDS_JSON`
 
