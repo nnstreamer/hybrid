@@ -38,6 +38,7 @@ This CLI requires the `-ohttp` flag:
 When `-ohttp=enable`, you must also set:
 - `RELAY_URL` (or `OPENPCC_RELAY_URL`)
 - `OHTTP_SEEDS_JSON` (or `OPENPCC_OHTTP_SEEDS_JSON`)
+`ROUTER_URL` is not required in this mode.
 
 ## Configure identity policy (required for real attestation)
 Real attestation requires an OIDC identity policy. Provide it via env vars
