@@ -34,7 +34,7 @@ on:
         default: ""
       instance_profile_arn:
         type: string
-        description: Optional IAM instance profile ARN (required for private registries or secret fetch)
+        description: Optional IAM instance profile ARN (required when using OHTTP_SEEDS_SECRET_REF without OHTTP_SEEDS_JSON or private registries)
         default: ""
       image_registry:
         type: string
@@ -248,6 +248,11 @@ jobs:
           if enable_server3 and enable_ohttp:
               relay_raw = os.getenv("RELAY_URLS_JSON", "")
               seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
+              seeds_ref = os.getenv("OHTTP_SEEDS_SECRET_REF", "")
+              if seeds_ref.strip() and not seeds_raw.strip() and not instance_profile_arn:
+                  missing.append(
+                      "instance_profile_arn (required when OHTTP_SEEDS_SECRET_REF is set without OHTTP_SEEDS_JSON)"
+                  )
               if relay_raw.strip():
                   relay = parse_json("OPENPCC_RELAY_URLS_JSON", relay_raw, list)
                   if not relay:
@@ -416,6 +421,10 @@ jobs:
           require "image_registry" "${IMAGE_REGISTRY}"
           if [[ "${IMAGE_REGISTRY}" != public.ecr.aws/* ]]; then
             require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          fi
+          if [[ -z "${RESOLVED_INSTANCE_PROFILE_ARN}" && -n "${RESOLVED_OHTTP_SEEDS_SECRET_REF}" && -z "${RESOLVED_OHTTP_SEEDS_JSON}" ]]; then
+            echo "instance_profile_arn is required when OHTTP_SEEDS_SECRET_REF is set without OHTTP_SEEDS_JSON." >&2
+            missing=1
           fi
           if [[ "${RESOLVED_ENABLE_SERVER4}" == "true" ]]; then
             require "relay_security_group_id" "${RESOLVED_RELAY_SECURITY_GROUP_ID}"
