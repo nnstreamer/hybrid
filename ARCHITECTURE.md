@@ -169,28 +169,27 @@ one-shot deploy는 `OHTTP_SEEDS_SECRET_REF`를 `server-1`/`server-3`에 전달�
 
 ## CI/CD 및 배포 (Workflows)
 
-### 기본 원칙: 분리 워크플로 유지
+### 기본 원칙: One-shot deploy 단일 워크플로
 
-- 기본 운영 모드에서는 build/pack과 deploy를 분리한다.
-  - `build-pack` (빌드/패키징)
-  - `deploy` (배포)
-- 목적: 테스트/검증 후 배포 의사결정, 감사/재현성 확보
+- 기본 운영 모드는 build/pack/deploy를 **단일 워크플로**에서 수행한다.
+- 분리 워크플로(`build-pack`, `deploy`)는 제거한다.
+- 목적: 운영 단순화 및 bootstrap 입력 의존성(server-1 주소) 해소
 
-### 예외: One-time deploy workflow (v0.002 추가)
+### One-shot deploy 순차 배포 (v0.002 기본)
 
 - 요구: 한 번에 build/pack/deploy를 수행한다(이미지를 따로 확보해 나중에 deploy하는 흐름은 요구하지 않음).
 - 문제: server-1 주소가 deploy 단계에서 확정되며, server-2/4가 이를 설정에 포함해야 하는 bootstrap 이슈
-- v0.002 허용 설계: 순차 배포로 단순화
+- v0.002 설계: 순차 배포로 단순화
   - 먼저 `server-1`과 `server-3`를 build/pack/deploy하여 server-1 주소를 확보
   - 이후 확보한 주소를 입력으로 `server-2`와 `server-4`를 build/pack/deploy
 
 
-## 배포/CI 다이어그램 2: One-time deploy 순차 배포
+## 배포/CI 다이어그램 2: One-shot deploy 순차 배포
 
 ```mermaid
 sequenceDiagram
   autonumber
-  participant GH as GitHub Actions (one-time deploy)
+  participant GH as GitHub Actions (one-shot deploy)
   participant S1 as server-1 (Router+Gateway)
   participant S3 as server-3 (Auth)
   participant S2 as server-2 (Compute)
@@ -204,7 +203,7 @@ sequenceDiagram
   GH->>S4: build/pack/deploy server-4\n(configure upstream gateway=server-1)
 ```
 
-- 핵심: one-time deploy에서는 “server-1/3 → server-2/4” 순서로 bootstrap 이슈를 우회할 수 있다.
+- 핵심: one-shot deploy에서는 “server-1/3 → server-2/4” 순서로 bootstrap 이슈를 우회할 수 있다.
 
 
 ## `server-3 /api/config` 최소 스키마 (제안)
@@ -230,7 +229,7 @@ v0.002 범위(결제/크레딧/BlindBank 제외)에서 client가 oHTTP 요청을
 
 ## One-time deploy: outputs/env 변수 (제안)
 
-요구사항의 핵심은 “server-1 주소가 deploy에서 결정 → server-2/4가 그 값을 포함해야 함”이므로, one-time deploy는 아래 값을 server-1 배포 결과로 추출해 후속 단계에 전달한다.
+요구사항의 핵심은 “server-1 주소가 deploy에서 결정 → server-2/4가 그 값을 포함해야 함”이므로, one-shot deploy는 아래 값을 server-1 배포 결과로 추출해 후속 단계에 전달한다.
 
 ### Stage A(server-1 + server-3 먼저 배포)에서 반드시 산출할 값
 

@@ -13,8 +13,7 @@
 - [ ] VPC Subnet, Security Group 준비 (router/compute 분리 권장)
 - [ ] (선택) EC2 Instance Profile(역할) 준비
 - [ ] AMI ID(예: Ubuntu 22.04) 결정
-- [ ] (선택) EIF 자동화를 위한 self-hosted runner 준비
-- [ ] GitHub Actions에서 Build/Deploy 워크플로 실행
+- [ ] GitHub Actions에서 One-shot deploy 워크플로 실행
 
 ---
 
@@ -43,7 +42,6 @@ Access Key는 사용하지 않습니다.
     `ecr-public:CompleteLayerUpload`, `ecr-public:PutImage`
   - **필수**: `sts:GetServiceBearerToken` (ECR Public 로그인/푸시용)
   - 간단히는 `AmazonElasticContainerRegistryPublicFullAccess` 사용 가능
-- (선택) build-pack에서 EIF를 S3에 올릴 때의 S3 권한
 - (선택) Instance Profile을 부착할 때의 `iam:PassRole`
 
 ### 1-3. AWS_ROLE_ARN 확인 및 GitHub Secrets 등록
@@ -143,64 +141,42 @@ aws iam list-instance-profiles-for-role --role-name <ROLE_NAME>
 
 ---
 
-## 6) 빌드/패킹 워크플로 실행 (선택)
+## 6) One-shot deploy 워크플로 실행 (필수)
 
-GitHub Actions → `OpenPCC Proto 1 Build Pack` 워크플로를 실행합니다.
-
-### 주요 입력값
-
-- `component`: `all` / `server-1` / `server-2` / `client`
-- `push`: `true`면 ECR로 푸시
-- `build_eif`: `true`면 EIF 생성 시도
-- `compute_eif_s3_uri`: EIF를 업로드할 S3 경로 (build_eif=true일 때 필수)
-- `aws_region`: ECR 리전
-
-> `build_eif=true`를 쓰려면 **push=true**가 필요합니다.  
-> `build_eif`는 **`component=server-2` 또는 `all`일 때만 지원**합니다.  
-> EIF는 S3에 업로드되며, 경로는 `compute_eif_s3_uri`로 지정합니다.
-
-### 6-1) EIF 자동화를 위한 Self-hosted Runner 준비 (선택)
-
-GitHub hosted runner(ubuntu-latest)에서는 Nitro Enclaves 환경이 없어 EIF 생성이 실패합니다.  
-EIF 자동화를 하려면 **AWS 내 self-hosted runner**를 별도로 준비해야 합니다.  
-설정 절차와 최소 사양은 아래 문서를 참고하세요.
-
-- [DEPLOY_BUILDER_FOR_EIF.md](./DEPLOY_BUILDER_FOR_EIF.md)
-
-> **A 방식(배포 단계 EIF 생성)**을 기본으로 사용할 경우,
-> build-pack 단계에서 EIF를 만들 필요가 없습니다.
-
----
-
-## 7) 배포 워크플로 실행 (필수)
-
-GitHub Actions → `OpenPCC Proto 1 Deploy` 워크플로 실행
+GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니다.  
+이 워크플로는 **build/pack/deploy를 한 번에** 수행하며,  
+`server-1/3 → server-2/4` 순서로 **순차 배포**를 진행합니다.
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
-### 7-1. 필수 입력값 (직접 입력 또는 저장값 필요)
+### 6-1. 필수 입력값 (직접 입력 또는 저장값 필요)
 
 - `aws_region`
 - `subnet_id`
 - `router_security_group_id`
 - `compute_security_group_id`
-- `ami_id` (또는 router/compute 전용 AMI)
-- `image_registry` (공개 레지스트리 기본값, 예: `public.ecr.aws/alias`)
+- `ami_id` (공통 AMI 또는 server별 AMI 기반)
+- `image_registry` (공개 레지스트리 사용 시) **또는** `instance_profile_arn` (프라이빗 레지스트리 사용 시)
+- `auth_security_group_id` (enable_server3=true일 때)
+- `relay_security_group_id` (server-4 배포 스크립트를 사용할 때)
 
-### 7-2. 선택 입력값
+### 6-2. 선택 입력값
 
-- `instance_profile_arn` (인스턴스에서 AWS API를 사용할 때만 필요)
 - `key_name` (EC2 SSH 키, 필요 시)
-- `router_address` (Router 주소를 직접 지정할 때 사용)
-- `enclave_cid` (기본값: 16, VSOCK용 Enclave CID)
-- `tpm_simulator_cmd_port` (기본값: 2321, TPM 시뮬레이터 CMD 포트)
-- `tpm_simulator_platform_port` (기본값: 2322, TPM 시뮬레이터 PLATFORM 포트)
-- 인스턴스 타입 변경
+- `enable_server3` (server-3 빌드/배포 활성화)
+- `enable_ohttp` (server-3 oHTTP config 생성)
+- `enable_real_attestation_for_client` (client용 real attestation 정책 활성화)
+- `enable_fake_attestation_for_server2` (server-2 fake attestation 빌드)
+- `enable_compute_monitor` (server-2 모니터 설치)
+- `compute_instance_type`, `edge_instance_type`
+- `enclave_cpu_count`, `enclave_memory_mib`, `enclave_cid`
 
-> 배포 스크립트는 **ECR 로그인/S3 다운로드를 수행하지 않습니다.**  
+> `enable_real_attestation_for_client=true`와 `enable_fake_attestation_for_server2=true`는 동시에 사용할 수 없습니다.
+>
+> 배포 스크립트는 **인스턴스 내부에서 ECR 로그인/S3 다운로드를 수행하지 않습니다.**  
 > EIF는 Compute 인스턴스에서 **로컬로 생성**됩니다.
 
-### 7-2a. OHTTP seed 설정 가이드 (v0.002 준비)
+### 6-2a. OHTTP seed 설정 가이드 (v0.002 준비)
 
 `one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
 `OHTTP_SEEDS_SECRET_REF`는 `server-1`/`server-3`에 **전달만** 하며, 현재는 조회 로직이 없습니다.
@@ -266,7 +242,7 @@ aws secretsmanager create-secret \
 > 주의: 현재 배포 스크립트는 **참조 문자열을 전달만** 합니다.  
 > 저장소 종류에 맞는 **실제 조회/파싱 로직은 향후 server-1/server-3 구현에서 추가**해야 합니다.
 
-### 7-3. 개발용 TPM 시뮬레이터/프록시 구성
+### 6-3. 개발용 TPM 시뮬레이터/프록시 구성
 
 - v0.001 개발 버전은 **TPM Simulator(mssim)** 를 사용합니다.
 - 배포 스크립트는 Compute 호스트에 다음 **systemd 서비스**를 구성합니다:
@@ -278,48 +254,32 @@ aws secretsmanager create-secret \
   - 기본값(16)으로 동작하도록 구성되어 있으며, 변경 시 **호스트/Enclave 프록시가 동일 값**을 사용해야 합니다.
 - TPM 시뮬레이터 포트는 기본적으로 **2321/2322**를 사용하며, 배포 스크립트는 platform 포트를 **cmd 포트 + 1**로 보정합니다.
 
-### 7-4. 입력값 기억(자동 저장) 기능
+### 6-4. 입력값 기본값 설정 (Repository Variables)
 
-Deploy 워크플로는 **입력값을 GitHub Actions Variables에 자동 저장**합니다.  
-다음 실행에서는 **입력값을 비워도 저장된 값이 자동으로 사용**됩니다.
+One-shot deploy는 **입력값이 비어 있으면 Repository Variables 값을 사용**합니다.  
+**자동 저장 기능은 제공하지 않습니다.**
 
 Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables → Actions → Variables
 
-**저장되는 변수 이름(Repository Variables)**
+**주요 변수 예시(기본값 용도)**
 - `OPENPCC_AWS_REGION`
 - `OPENPCC_SUBNET_ID`
 - `OPENPCC_ROUTER_SECURITY_GROUP_ID`
+- `OPENPCC_AUTH_SECURITY_GROUP_ID`
 - `OPENPCC_COMPUTE_SECURITY_GROUP_ID`
+- `OPENPCC_RELAY_SECURITY_GROUP_ID`
 - `OPENPCC_INSTANCE_PROFILE_ARN`
-- `OPENPCC_ROUTER_ADDRESS`
 - `OPENPCC_IMAGE_REGISTRY`
 - `OPENPCC_KEY_NAME`
 - `OPENPCC_AMI_ID`
-- `OPENPCC_ROUTER_AMI_ID`
-- `OPENPCC_COMPUTE_AMI_ID`
-- `OPENPCC_ROUTER_INSTANCE_TYPE`
-- `OPENPCC_COMPUTE_INSTANCE_TYPE`
 - `OPENPCC_ENCLAVE_CPU_COUNT`
 - `OPENPCC_ENCLAVE_MEMORY_MIB`
 - `OPENPCC_ENCLAVE_CID`
-- `OPENPCC_TPM_SIMULATOR_CMD_PORT`
-- `OPENPCC_TPM_SIMULATOR_PLATFORM_PORT`
 
 > 이 값들은 **Secrets가 아니라 Variables**에 저장됩니다.  
 > 민감한 값은 저장하지 않는 것을 권장합니다.
 
-**동작 방식**
-- 입력값이 있으면 → 해당 값 사용 + 변수 업데이트
-- 입력값이 비어 있으면 → 저장된 변수값 사용
-- 값이 모두 비어 있으면 → 필수값 오류
-
-> GitHub UI가 입력칸을 자동으로 채워주지는 않지만,  
-> **비워두고 실행하면 저장값이 자동 적용**됩니다.
->
-> 변수 저장 단계에서 **API 호출이 실패하면 워크플로가 실패**합니다.  
-> 따라서 해당 리포지토리의 **Actions Variables 쓰기 권한**이 필요합니다.
-
-### 7-5. Known Issues (PoC)
+### 6-5. Known Issues (PoC)
 
 - 현재 배포는 **server-1의 private IP를 기준**으로 router/gateway 주소를 구성합니다.
   - 모든 서버가 **동일 Subnet에 있는 PoC 환경**을 전제로 동작합니다.
@@ -332,7 +292,7 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 
 ---
 
-## 8) 배포 후 확인
+## 7) 배포 후 확인
 
 1. EC2 콘솔에서 인스턴스 생성 확인
 2. Router 인스턴스에서 포트 3600 응답 확인
@@ -344,7 +304,7 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 
 ---
 
-## 9) 자주 묻는 질문(초보자용)
+## 8) 자주 묻는 질문(초보자용)
 
 ### Q1. Access Key를 코드에 넣어야 하나요?
 아니요. **GitHub Secrets에 `AWS_ROLE_ARN`을 등록하면** 워크플로가 자동으로 사용합니다.
@@ -359,21 +319,21 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 
 ---
 
-## 10) 요약
+## 9) 요약
 
 1. AWS_ROLE_ARN을 GitHub Secrets에 등록
 2. 공개 레지스트리/네트워크/AMI 준비 (필요 시 Instance Profile)
-3. Build/Deploy 워크플로 실행
+3. One-shot deploy 워크플로 실행
 
 여기까지 완료하면 GitHub Actions만으로 배포가 가능합니다.
 
 ---
 
-## 11) 로컬 system_test.sh 실행 시 주의사항
+## 10) 로컬 system_test.sh 실행 시 주의사항
 
 이 섹션은 로컬 통합 테스트(`system_test.sh`) 실행 중 겪는 문제를 예방하기 위한 안내입니다.
 
-### 11-1. sudo 실행 권장
+### 10-1. sudo 실행 권장
 
 Docker 데몬 권한 문제를 피하려면 다음 방식으로 실행합니다.
 
@@ -381,7 +341,7 @@ Docker 데몬 권한 문제를 피하려면 다음 방식으로 실행합니다.
 
 빌드/실행이 서로 다른 Docker 데몬을 사용하면 이미지가 보이지 않는 문제가 발생할 수 있습니다.
 
-### 11-2. 고정 컨테이너/포트 충돌
+### 10-2. 고정 컨테이너/포트 충돌
 
 스크립트는 고정된 컨테이너 이름과 호스트 포트를 사용합니다.
 
@@ -390,7 +350,7 @@ Docker 데몬 권한 문제를 피하려면 다음 방식으로 실행합니다.
 
 이미 동일한 컨테이너/포트가 사용 중이면 충돌이 발생할 수 있습니다.
 
-### 11-3. Transparency policy 에러
+### 10-3. Transparency policy 에러
 
 로컬 클라이언트 코드에서 투명성 정책이 없으면 다음 에러가 날 수 있습니다.
 

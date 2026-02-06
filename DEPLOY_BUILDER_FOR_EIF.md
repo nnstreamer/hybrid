@@ -5,27 +5,30 @@
 불가능합니다. 이 문서는 **AWS 내 self-hosted runner**를 준비해
 `runs-on: [self-hosted, nitro-eif]` 잡이 정상 동작하도록 설정하는 방법을 안내합니다.
 
+> **현재 기본 배포는 One-shot deploy 워크플로**이며,
+> **EIF 사전 빌드(`build_eif`) 잡은 제공하지 않습니다.**
+> 필요 시 **커스텀 워크플로**에서 `build_eif`를 구성할 때 이 문서를 참고하세요.
+
 > **참고(A 방식)**  
 > 배포 단계에서 Router 주소를 고정해 EIF를 생성하는 방식(A 방식)을 사용할 경우,
 > 별도의 self-hosted runner 없이 **Compute 호스트에서 EIF를 생성**합니다.
 > 이 문서는 **사전 빌드 EIF(build_eif)**를 사용할 때에만 필요합니다.
 > 사전 빌드 EIF는 **Router 주소가 이미 고정**되어 있어야 합니다.
 
-### 대상 워크플로
-- `.github/workflows/deploy.yml` → `build-eif` job
-- `.github/workflows/build-pack.yml` → `build-eif` job
+### 적용 범위(커스텀 워크플로)
+- `runs-on: [self-hosted, nitro-eif]`를 사용하는 `build_eif` 잡
 
 ## 사전 준비
 - AWS 계정 및 VPC/서브넷
 - S3 버킷(결과 EIF 업로드용)
 - ECR 접근 권한(빌드 대상 이미지 pull)
 - GitHub repo 관리자 권한(러너 등록 필요)
-- GitHub Secrets에 AWS 자격증명 등록
-  - `AWS_ACCESS_KEY_ID`
-  - `AWS_SECRET_ACCESS_KEY`
+- GitHub Secrets에 AWS 인증 정보 등록
+  - (권장) `AWS_ROLE_ARN` (OIDC)
+  - (선택) `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (Access Key 사용 시)
 
-> 이 레포의 워크플로는 `configure-aws-credentials`에서 **Access Key 기반 인증**을 사용합니다.
-> IAM Role 기반(OIDC)으로 바꾸려면 워크플로 수정이 필요합니다.
+> 현재 기본 워크플로는 `configure-aws-credentials`에서 **OIDC 기반 인증**을 사용합니다.
+> 커스텀 워크플로에서도 OIDC 사용을 권장합니다.
 
 ## EC2 최소 사양 (EIF 빌드 기준)
 - **인스턴스 타입**: Nitro Enclaves 지원 타입 중 **large 이상**
@@ -34,8 +37,8 @@
 - **디스크**: gp3 30GiB 이상 (최소)
 - **네트워크**: 아웃바운드 443 허용 (ECR/S3 접근)
 - **IAM Role (선택)**: ECR read + S3 write 권한
-  - 워크플로는 Access Key를 사용하므로 필수는 아니지만,
-    운영 환경에서는 최소 권한을 갖춘 전용 Role을 권장합니다.
+  - runner 인스턴스에 Role을 부여하면 Access Key 없이도 동작할 수 있습니다.
+  - 운영 환경에서는 최소 권한을 갖춘 전용 Role을 권장합니다.
 
 > 빌드 시간이 길거나 이미지가 큰 경우 `xlarge` 이상으로 증설하는 것이 좋습니다.
 
