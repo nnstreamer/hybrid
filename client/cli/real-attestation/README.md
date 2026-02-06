@@ -29,6 +29,16 @@ router_url=http://<router-ip>:3600
 
 Supported keys: `router_url`, `server1_url`, `server_1_url`.
 
+## oHTTP mode (required flag)
+This CLI requires the `-ohttp` flag:
+
+- `-ohttp=disable` (router direct)
+- `-ohttp=enable` (relay + gateway)
+
+When `-ohttp=enable`, you must also set:
+- `RELAY_URL` (or `OPENPCC_RELAY_URL`)
+- `OHTTP_SEEDS_JSON` (or `OPENPCC_OHTTP_SEEDS_JSON`)
+
 ## Configure identity policy (required for real attestation)
 Real attestation requires an OIDC identity policy. Provide it via env vars
 or `/etc/nnstreamer/hybrid.ini`.
@@ -76,5 +86,12 @@ go build -o real-attestation-client .
 
 Or run directly:
 ```bash
-go run .
+go run . -ohttp=disable
+```
+
+Example (oHTTP enabled):
+```bash
+export RELAY_URL="http://<relay-ip>:3100"
+export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-01-30T00:00:00Z","active_until":"2026-07-30T00:00:00Z"}]'
+go run . -ohttp=enable
 ```

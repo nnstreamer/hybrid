@@ -30,6 +30,7 @@ Required fields when `features.real_attestation` is `true`:
 Optional fields:
 
 - `attestation.allowed` (object)
+- `attestation.allowed_*` (object fields with `allowed_` prefix; cannot be mixed with `attestation.allowed`)
 - `attestation.verifier_hints` (object)
 
 See `config/server-3.sample.json` for a concrete example.

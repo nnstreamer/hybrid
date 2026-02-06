@@ -1,4 +1,4 @@
-# OpenPCC에서 프라이버시가 보존되는 방식 (Prototype 1)
+# OpenPCC에서 프라이버시가 보존되는 방식 (v0.002)
 
 이 문서는 본 레포지토리의 설계 문서와 설정을 기준으로, 클라이언트 쿼리/응답이
 어떻게 보호되는지 요약합니다.
@@ -13,8 +13,10 @@
 - system_test.sh (로컬 테스트 설정)
 
 중요한 범위 참고:
-- 이 레포에는 실제 클라이언트 구현이 포함되어 있지 않습니다.
-  아래 내용은 ARCHITECTURE.md 및 upstream OpenPCC 설계를 기준으로 한 설명입니다.
+- 이 레포에는 `client/cli/*` 형태의 CLI 클라이언트가 포함되어 있습니다.
+  이 CLI는 환경 변수 또는 `/etc/nnstreamer/hybrid.ini` 설정으로 relay/seed를 받으며,
+  `server-3 /api/config`를 직접 호출하지 않습니다.
+- 프로덕션 SDK 동작은 upstream OpenPCC를 기준으로 합니다.
 
 ## 용어 요약
 
@@ -30,7 +32,8 @@
 
 ## 프라이버시 보존의 핵심 흐름
 
-1) 클라이언트는 Router로부터 ComputeNode의 증명 번들(TPM quote, PCR)을 수신한다.
+1) 클라이언트는 server-3(제어 플레인) 또는 로컬 CLI 설정으로 라우팅 구성을 얻고,
+   Router로부터 ComputeNode의 증명 번들(TPM quote, PCR)을 수신한다.
    (증명 번들에는 REK 공개키가 포함되며, REK 개인키는 TPM에 유지됨)
 2) 클라이언트는 증명(Attestation)을 검증한다.
 3) 클라이언트가 쿼리를 암호화한다.
@@ -38,7 +41,9 @@
    - REK 공개키로 DEK를 HPKE 암호화
      (클라이언트는 공개키로 암호화, Compute는 개인키로 복호화)
    - 프롬프트를 BHTTP로 직렬화하고 DEK로 암호화
-4) Router는 복호화 없이 암호화된 요청을 전달한다.
+4) oHTTP가 활성화된 경우 Relay → Gateway → Router 경로를 통과한다.
+   oHTTP가 비활성화된 경우 클라이언트가 Router로 직접 요청한다.
+   Router는 복호화 없이 암호화된 요청을 전달한다.
 5) Compute enclave가 TPM 내 REK 개인키로 DEK를 복호화하고,
    프롬프트를 복호화해 추론한다.
 
@@ -52,6 +57,8 @@
 sequenceDiagram
   autonumber
   participant Client
+  participant Relay as Server-4 (Relay)
+  participant Gateway as Server-1 (Gateway)
   participant Router as Server-1 (Router)
   participant TPM
   participant Enclave as Server-2 (Compute Enclave)
@@ -65,7 +72,13 @@ sequenceDiagram
   Client->>Client: 프롬프트 BHTTP 직렬화
   Client->>Client: DEK로 프롬프트 암호화
 
-  Client->>Router: 암호화 요청 (DEK 래핑 + ciphertext)
+  alt oHTTP 활성화
+    Client->>Relay: oHTTP 캡슐화 요청
+    Relay->>Gateway: 포워딩
+    Gateway->>Router: 디캡슐화된 내부 요청
+  else oHTTP 비활성화
+    Client->>Router: 암호화 요청 (DEK 래핑 + ciphertext)
+  end
   Router->>Enclave: 암호화 요청 전달 (복호화 없음)
 
   Enclave->>TPM: REK로 DEK 복호화

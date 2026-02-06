@@ -1,4 +1,4 @@
-# How Privacy Is Preserved in OpenPCC (Prototype 1)
+# How Privacy Is Preserved in OpenPCC (v0.002)
 
 Korean version: [HOW_PRIVACY_IS_PRESERVED.ko.md](./HOW_PRIVACY_IS_PRESERVED.ko.md)
 
@@ -14,9 +14,11 @@ Sources in this repository:
 - HOW-TO-DEPLOY.md
 - system_test.sh (local test settings)
 
-Important scope note:
-- The client implementation is not included in this repo. The encryption flow
-  below follows the design notes in ARCHITECTURE.md and upstream OpenPCC.
+Important scope notes:
+- This repo includes CLI clients under `client/cli/*`. These CLIs accept relay
+  and seed configuration via environment variables or `/etc/nnstreamer/hybrid.ini`
+  and do not call `server-3 /api/config` directly.
+- Production SDK behavior is defined upstream in OpenPCC.
 
 ## Terms (short)
 
@@ -32,13 +34,17 @@ Important scope note:
 
 ## High-level privacy model
 
-1) The client verifies the compute node attestation evidence (TPM quote, PCRs),
-   which includes the REK public key; the REK private key stays inside the TPM.
+1) The client obtains routing config either from server-3 (control-plane) or
+   local CLI config (env/INI), then verifies the compute node attestation
+   evidence (TPM quote, PCRs) which includes the REK public key; the REK private
+   key stays inside the TPM.
 2) The client encrypts the query:
    - Generate a DEK (symmetric).
    - Encrypt (wrap) the DEK with the REK public key using HPKE.
    - Serialize the prompt as BHTTP and encrypt it using the DEK.
-3) The router forwards the encrypted request without decrypting it.
+3) With oHTTP enabled, the relay forwards to the gateway, which decapsulates and
+   forwards to the router. Without oHTTP, the client sends directly to the router.
+   The router forwards the encrypted request without decrypting it.
 4) The compute enclave uses the REK private key in TPM to decrypt the DEK, then
    decrypts the prompt, runs inference, and prepares a response.
 
@@ -53,6 +59,8 @@ Note about responses:
 sequenceDiagram
   autonumber
   participant Client
+  participant Relay as Server-4 (Relay)
+  participant Gateway as Server-1 (Gateway)
   participant Router as Server-1 (Router)
   participant TPM
   participant Enclave as Server-2 (Compute Enclave)
@@ -66,7 +74,13 @@ sequenceDiagram
   Client->>Client: BHTTP serialize prompt
   Client->>Client: Encrypt prompt with DEK
 
-  Client->>Router: Encrypted request (DEK wrapped + ciphertext)
+  alt oHTTP enabled
+    Client->>Relay: Encapsulated oHTTP request
+    Relay->>Gateway: Forward only
+    Gateway->>Router: Decapsulated inner request
+  else oHTTP disabled
+    Client->>Router: Encrypted request (DEK wrapped + ciphertext)
+  end
   Router->>Enclave: Forward encrypted request (no decrypt)
 
   Enclave->>TPM: Use REK to decrypt DEK

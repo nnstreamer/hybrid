@@ -2,7 +2,7 @@
 
 이 문서는 **oHTTP 포함** 경로로 `server-1/2/3/4` 전체를 통과하는
 간단한 테스트를 수행하는 방법을 설명합니다.
-테스트 클라이언트는 `/client/cli/fake_attestation`을 사용합니다.
+테스트 클라이언트는 `/client/cli/fake-attestation`을 사용합니다.
 
 ---
 

@@ -1,6 +1,6 @@
 # HOW TO DEPLOY (AWS Beginner Friendly)
 
-이 문서는 GitHub Actions로 OpenPCC Prototype 1을 AWS에 배포하는 방법을 단계별로 설명합니다.
+이 문서는 GitHub Actions로 OpenPCC v0.002를 AWS에 배포하는 방법을 단계별로 설명합니다.
 초보자가 따라할 수 있도록 최소 개념과 입력값을 정리했습니다.
 
 ---
@@ -173,7 +173,7 @@ aws iam list-instance-profiles-for-role --role-name <ROLE_NAME>
 
 GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니다.  
 이 워크플로는 **build/pack/deploy를 한 번에** 수행하며,  
-`server-1/3 → server-2/4` 순서로 **순차 배포**를 진행합니다.
+`server-1 → server-4 → server-3 → server-2` 순서로 **순차 배포**를 진행합니다.
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
@@ -193,12 +193,14 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `key_name` (EC2 SSH 키, 필요 시)
 - `instance_profile_arn` (public ECR + OHTTP_SEEDS_JSON 직접 입력이면 생략 가능)
 - `enable_server3` (server-3 빌드/배포 활성화)
+- `enable_server4` (server-4 빌드/배포 활성화)
 - `enable_ohttp` (server-3 oHTTP config 생성)
 - `enable_real_attestation_for_client` (client용 real attestation 정책 활성화)
 - `enable_fake_attestation_for_server2` (server-2 fake attestation 빌드)
 - `enable_compute_monitor` (server-2 모니터 설치)
 - `compute_instance_type`, `edge_instance_type`
 - `enclave_cpu_count`, `enclave_memory_mib`, `enclave_cid`
+- `OPENPCC_RELAY_URLS_JSON` (enable_ohttp=true 이면서 server-4를 배포하지 않을 때 필요)
 
 > `enable_real_attestation_for_client=true`와 `enable_fake_attestation_for_server2=true`는 동시에 사용할 수 없습니다.
 >
@@ -208,9 +210,10 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 ### 6-2a. OHTTP seed 설정 가이드 (v0.002 준비)
 
 `one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
-`OHTTP_SEEDS_SECRET_REF`는 `server-1`에서 **OHTTP_SEEDS_JSON이 없을 때만** 조회에 사용됩니다.
+`OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 **JSON을 조회해 주입할 때만** 사용됩니다
+(gateway 자체는 `OHTTP_SEEDS_JSON`만 읽습니다).
 
-**권장 (AWS API 의존성 제거): OHTTP_SEEDS_JSON 직접 입력**
+**필수(One-shot deploy에서 enable_ohttp=true): OHTTP_SEEDS_JSON 직접 입력**
 - GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)
 - 또는 Repository Variables: `OPENPCC_OHTTP_SEEDS_JSON`
 
@@ -226,7 +229,7 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 ]
 ```
 
-**참조 방식(OHTTP_SEEDS_SECRET_REF)**
+**참조 방식(OHTTP_SEEDS_SECRET_REF, 선택)**
 - Repository Variable: `OPENPCC_OHTTP_SEEDS_SECRET_REF`
 
 #### A) AWS Secrets Manager 사용
@@ -256,7 +259,7 @@ aws secretsmanager create-secret \
 ```
 
 3) 출력된 ARN을 `OHTTP_SEEDS_SECRET_REF`로 설정
-- 워크플로 입력 또는 `OPENPCC_OHTTP_SEEDS_SECRET_REF` 변수에 입력
+- `OPENPCC_OHTTP_SEEDS_SECRET_REF` Repository Variable에 입력
 
 4) 인스턴스 프로파일 권한
 - `secretsmanager:GetSecretValue` 권한을 해당 ARN에 부여
@@ -269,12 +272,12 @@ aws secretsmanager create-secret \
    - 예: `ssm:/openpcc/ohttp-seeds`, `vault://secret/openpcc/ohttp`, `s3://bucket/path/ohttp_seeds.json`
 3) 해당 저장소에 접근 가능한 IAM/크레덴셜을 인스턴스에 부여
 
-> 주의: 현재 배포 스크립트는 **참조 문자열을 전달만** 합니다.  
-> 저장소 종류에 맞는 **실제 조회/파싱 로직은 향후 server-1/server-3 구현에서 추가**해야 합니다.
+> 주의: `deploy_server1.sh`는 일부 저장소(AWS Secrets Manager/SSM)만 조회합니다.  
+> `server-1` gateway 자체는 **OHTTP_SEEDS_JSON만** 읽습니다.
 
 ### 6-3. 개발용 TPM 시뮬레이터/프록시 구성
 
-- v0.001 개발 버전은 **TPM Simulator(mssim)** 를 사용합니다.
+- 개발/로컬 테스트는 **TPM Simulator(mssim)** 를 사용합니다.
 - 배포 스크립트는 Compute 호스트에 다음 **systemd 서비스**를 구성합니다:
   - `openpcc-tpm-sim`: TPM Simulator 실행
   - `openpcc-vsock-router`, `openpcc-vsock-tpm-*`: Enclave → Router/TPM 접근용 VSOCK 프록시
