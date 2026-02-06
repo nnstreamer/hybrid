@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Objective: Deploy OpenPCC compute node (server-2) to AWS EC2.
 # Usage examples:
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... COMPUTE_SECURITY_GROUP_ID=... AMI_ID=... INSTANCE_PROFILE_ARN=... ROUTER_ADDRESS=http://10.0.1.10:3600 ./scripts/deploy_server2.sh
-# - Required: INSTANCE_PROFILE_ARN=... (optional: KEY_NAME=...)
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... COMPUTE_SECURITY_GROUP_ID=... AMI_ID=... ROUTER_ADDRESS=http://10.0.1.10:3600 ./scripts/deploy_server2.sh
+# - Optional: INSTANCE_PROFILE_ARN=... KEY_NAME=...
 # Notes:
 # - Requires AWS credentials in the environment.
 # - Compute instances require Nitro Enclaves enabled instance types.
@@ -48,7 +48,6 @@ require_env() {
 require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
-require_env INSTANCE_PROFILE_ARN
 if [[ "${ECR_REGISTRY}" != public.ecr.aws/* ]]; then
   echo "ECR_REGISTRY must be a public ECR registry (public.ecr.aws/alias)." >&2
   exit 1
@@ -62,7 +61,9 @@ make_common_args() {
     --security-group-ids "${security_group_id}"
   )
 
-  args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
+    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  fi
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")

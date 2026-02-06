@@ -34,7 +34,7 @@ on:
         default: ""
       instance_profile_arn:
         type: string
-        description: Required IAM instance profile ARN for EC2
+        description: Optional IAM instance profile ARN (required for private registries or secret fetch)
         default: ""
       image_registry:
         type: string
@@ -960,8 +960,10 @@ jobs:
           require "server1_router_url" "${SERVER1_ROUTER_URL}"
           require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
           require "ami_id" "${RESOLVED_AMI_ID}"
-          require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
           require "image_registry" "${IMAGE_REGISTRY}"
+          if [[ "${IMAGE_REGISTRY}" != public.ecr.aws/* ]]; then
+            require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          fi
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
