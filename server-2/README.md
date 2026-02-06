@@ -1,15 +1,10 @@
 # server-2
 
-This is the compute node of the PCC system.
+This is the compute node of the OpenPCC v0.002 stack.
 
-## Version 0.001, the first prototype
+## Overview
 
-This is the compute node directly created by the default configuration of
-openpcc and confidentsecurity/confidentcompute.
-
-This uses Ollama as the LLM runtime and bakes the default 1B model into the
-image at build time for offline enclave use. No NVIDIA acceleration or other
-optimizations are enabled in this prototype.
-
-Further changes for optimization, flexibility, or rebasing on TAOS-D will be
-done in later versions.
+- Built from confidentsecurity/confidentcompute.
+- Uses Ollama as the default LLM runtime and bakes the default 1B model at build time.
+- Fake attestation build tags are available for local/dev; real attestation is expected for production.
+- The one-shot deploy workflow runs this as a Nitro Enclave (EIF built at deploy time).

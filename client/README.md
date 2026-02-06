@@ -1,6 +1,6 @@
 # client
 
-This provides Tizen/Android libraries for LLM serving via server-1.
+This provides Tizen/Android libraries for LLM serving via server-1 (Not Yet Implemented).
 This also provides sample client applications (or test apps).
 
 ## CLI helpers

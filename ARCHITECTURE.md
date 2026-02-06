@@ -100,6 +100,8 @@ flowchart LR
   - `server-3`는 client가 사용할 relay URL과 gateway 공개키 구성(oHTTP key config)을 제공한다.
   - `server-4`는 키를 몰라도 되고, 포워딩만 한다.
   - `server-1`은 gateway로서 디캡슐화 후 allow-list된 내부 라우팅만 수행하며, 그 다음 router가 compute로 forwarding 한다.
+  - 이 레포의 CLI(client/cli/*)는 `server-3 /api/config`를 호출하지 않고,
+    환경 변수/INI로 relay URL과 oHTTP seeds를 직접 주입하는 방식도 지원한다.
 
 
 ## oHTTP 키/회전 정책 (v0.002: 옵션 A, 향후 옵션 C 확장)
@@ -132,10 +134,15 @@ enable 조건 및 입력은 아래와 같다.
 - enable 옵션: one-shot deploy에서 `enable_ohttp=true`
 - 필수 입력:
   - `OPENPCC_OHTTP_SEEDS_JSON` (seed 목록 JSON)
-  - `OPENPCC_OHTTP_SEEDS_SECRET_REF` (동일 seed 세트 참조)
+- 선택 입력:
+  - `OPENPCC_OHTTP_SEEDS_SECRET_REF` (deploy 스크립트에서 JSON을 조회할 때만 사용)
 - 동작:
   - `server-3`는 seeds JSON으로 public key config(+rotation)를 생성하여 `/api/config`에 포함한다.
-  - `server-1`은 `OHTTP_SEEDS_SECRET_REF`를 전달받아 gateway에서 seed 로딩에 사용한다.
+  - `server-1` gateway는 `OHTTP_SEEDS_JSON` 환경변수만 읽는다.
+    `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 JSON을 조회해 주입할 때만 사용된다.
+
+참고: one-shot deploy 워크플로는 `enable_ohttp=true`일 때
+`OPENPCC_OHTTP_SEEDS_JSON`이 반드시 존재하도록 사전 검증한다.
 
 주의(명시): 옵션 A는 운영 단순성이 장점이지만, seed가 `server-3`에도 존재할 수 있어 권한 분리 관점이 약해질 수 있다. 따라서 장기적으로 옵션 C로 확장한다.
 
@@ -185,10 +192,12 @@ enable 조건 및 입력은 아래와 같다.
 ### One-shot deploy 순차 배포 (v0.002 기본)
 
 - 요구: 한 번에 build/pack/deploy를 수행한다(이미지를 따로 확보해 나중에 deploy하는 흐름은 요구하지 않음).
-- 문제: server-1 주소가 deploy 단계에서 확정되며, server-2/4가 이를 설정에 포함해야 하는 bootstrap 이슈
+- 문제: server-1 주소가 deploy 단계에서 확정되며, server-4/3/2가 이를 설정에 포함해야 하는 bootstrap 이슈
 - v0.002 설계: 순차 배포로 단순화
-  - 먼저 `server-1`과 `server-3`를 build/pack/deploy하여 server-1 주소를 확보
-  - 이후 확보한 주소를 입력으로 `server-2`와 `server-4`를 build/pack/deploy
+  - 먼저 `server-1`을 build/pack/deploy하여 gateway/router 주소를 확보
+  - 이후 `server-4`를 build/pack/deploy하여 relay URL을 확보
+  - 이후 확보한 relay URL과 server-1 주소로 `server-3`를 build/pack/deploy
+  - 마지막으로 `server-2`를 build/pack/deploy (router URL을 입력으로 사용)
 
 
 ## 배포/CI 다이어그램 2: One-shot deploy 순차 배포
@@ -198,19 +207,19 @@ sequenceDiagram
   autonumber
   participant GH as GitHub Actions (one-shot deploy)
   participant S1 as server-1 (Router+Gateway)
+  participant S4 as server-4 (Relay)
   participant S3 as server-3 (Auth)
   participant S2 as server-2 (Compute)
-  participant S4 as server-4 (Relay)
 
   GH->>S1: build/pack/deploy server-1
-  GH->>S3: build/pack/deploy server-3
-  Note over GH: Outputs acquired after deploy:\n- server-1 internal IP/DNS\n- endpoints needed for config
-
-  GH->>S2: build/pack/deploy server-2\n(bake-in server-1 address if needed)
   GH->>S4: build/pack/deploy server-4\n(configure upstream gateway=server-1)
+  GH->>S3: build/pack/deploy server-3\n(config needs relay URL + server-1 address)
+  Note over GH: Outputs acquired after Stage A:\n- server-1 internal IP/DNS\n- server-1 router/gateway URLs\n- server-4 relay URL
+
+  GH->>S2: build/pack/deploy server-2\n(bake-in server-1 router URL)
 ```
 
-- 핵심: one-shot deploy에서는 “server-1/3 → server-2/4” 순서로 bootstrap 이슈를 우회할 수 있다.
+- 핵심: one-shot deploy에서는 “server-1 → server-4 → server-3 → server-2” 순서로 bootstrap 이슈를 우회한다.
 
 
 ## `server-3 /api/config` 최소 스키마 (제안)
@@ -236,22 +245,22 @@ v0.002 범위(결제/크레딧/BlindBank 제외)에서 client가 oHTTP 요청을
 
 ## One-time deploy: outputs/env 변수 (제안)
 
-요구사항의 핵심은 “server-1 주소가 deploy에서 결정 → server-2/4가 그 값을 포함해야 함”이므로, one-shot deploy는 아래 값을 server-1 배포 결과로 추출해 후속 단계에 전달한다.
+요구사항의 핵심은 “server-1 주소가 deploy에서 결정 → server-4/3/2가 그 값을 포함해야 함”이므로, one-shot deploy는 아래 값을 server-1 배포 결과로 추출해 후속 단계에 전달한다.
 
-### Stage A(server-1 + server-3 먼저 배포)에서 반드시 산출할 값
+### Stage A(server-1 + server-4 + server-3 먼저 배포)에서 반드시 산출할 값
 
 | 변수 | 예시 | 의미 | 생성 시점/소스 | Stage B 사용처 |
 |---|---|---|---|---|
-| `SERVER1_INTERNAL_ADDR` | `10.0.1.23` 또는 내부 DNS | server-1 내부 주소 | server-1 deploy 후 EC2 조회 | `server-2` 설정 bake-in, `server-4` upstream, `server-3` config |
-| `SERVER1_GATEWAY_URL` | `http://10.0.1.23/` | relay upstream gateway URL | `SERVER1_INTERNAL_ADDR`로 조합 | `server-4` upstream |
-| `OHTTP_SEEDS_SECRET_REF` | `arn:...:secret:ohttp-seeds:version` | 옵션 A seed 세트 참조 | 워크플로 입력/환경 고정 | `server-1`/`server-3` 동일 seed 강제 |
+| `SERVER1_INTERNAL_ADDR` | `10.0.1.23` 또는 내부 DNS | server-1 내부 주소 | server-1 deploy 후 EC2 조회 | `server-2` router 주소 구성 |
+| `SERVER1_ROUTER_URL` | `http://10.0.1.23:3600/` | router base URL | `SERVER1_INTERNAL_ADDR`로 조합 | `server-2` router 주소 입력 |
+| `SERVER1_GATEWAY_URL` | `http://10.0.1.23:3200/` | relay upstream gateway URL | `SERVER1_INTERNAL_ADDR`로 조합 | `server-4` upstream |
+| `SERVER4_RELAY_URL` | `http://<relay-ip>:3100/` | relay URL | server-4 deploy 후 계산 | `server-3` config |
 
-### Stage B(server-2 + server-4 배포)에서 입력으로 필요한 값
+### Stage B(server-2 배포)에서 입력으로 필요한 값
 
 | 변수 | 의미 | 주입 대상 |
 |---|---|---|
-| `SERVER1_INTERNAL_ADDR` | server-2가 참조할 router/gateway 주소 | `server-2` build/pack/deploy |
-| `RELAY_UPSTREAM_GATEWAY_URL` | server-4 upstream gateway 주소 | `server-4` build/pack/deploy |
+| `SERVER1_ROUTER_URL` | server-2가 참조할 router 주소 | `server-2` build/pack/deploy |
 | `IMAGE_TAG` | 릴리즈 단위 동기화 | 공통 |
 
 PoC 기준에서는 모든 서버가 동일 Subnet에 있다고 가정하고
