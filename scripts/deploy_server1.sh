@@ -98,12 +98,12 @@ if [[ -n "${OHTTP_SEEDS_JSON_B64}" ]]; then
 fi
 if [[ -z "\${OHTTP_SEEDS_JSON}" && -n "${OHTTP_SEEDS_SECRET_REF}" ]]; then
   secret_ref="${OHTTP_SEEDS_SECRET_REF}"
-  if [[ "${secret_ref}" == secretsmanager:* ]]; then
+  if [[ "\${secret_ref}" == secretsmanager:* ]]; then
     secret_ref="\${secret_ref#secretsmanager:}"
   fi
-  if [[ "${secret_ref}" == arn:* || "${secret_ref}" == *:secret:* ]]; then
+  if [[ "\${secret_ref}" == arn:* || "\${secret_ref}" == *:secret:* ]]; then
     OHTTP_SEEDS_JSON=\$(aws secretsmanager get-secret-value --region "${AWS_REGION}" --secret-id "\${secret_ref}" --query SecretString --output text)
-  elif [[ "${secret_ref}" == ssm:* ]]; then
+  elif [[ "\${secret_ref}" == ssm:* ]]; then
     param_name="\${secret_ref#ssm:}"
     OHTTP_SEEDS_JSON=\$(aws ssm get-parameter --region "${AWS_REGION}" --with-decryption --name "\${param_name}" --query Parameter.Value --output text)
   else
