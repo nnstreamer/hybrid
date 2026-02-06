@@ -185,13 +185,13 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `compute_security_group_id`
 - `ami_id` (공통 AMI 또는 server별 AMI 기반)
 - `image_registry` (public.ecr.aws/alias)
-- `instance_profile_arn`
 - `auth_security_group_id` (enable_server3=true일 때)
 - `relay_security_group_id` (server-4 배포 스크립트를 사용할 때)
 
 ### 6-2. 선택 입력값
 
 - `key_name` (EC2 SSH 키, 필요 시)
+- `instance_profile_arn` (public ECR + OHTTP_SEEDS_JSON 직접 입력이면 생략 가능)
 - `enable_server3` (server-3 빌드/배포 활성화)
 - `enable_ohttp` (server-3 oHTTP config 생성)
 - `enable_real_attestation_for_client` (client용 real attestation 정책 활성화)
@@ -208,7 +208,7 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 ### 6-2a. OHTTP seed 설정 가이드 (v0.002 준비)
 
 `one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
-`OHTTP_SEEDS_SECRET_REF`는 `server-1`/`server-3`에 **전달만** 하며, 현재는 조회 로직이 없습니다.
+`OHTTP_SEEDS_SECRET_REF`는 `server-1`에서 **OHTTP_SEEDS_JSON이 없을 때만** 조회에 사용됩니다.
 
 **권장 (AWS API 의존성 제거): OHTTP_SEEDS_JSON 직접 입력**
 - GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)
@@ -260,6 +260,7 @@ aws secretsmanager create-secret \
 
 4) 인스턴스 프로파일 권한
 - `secretsmanager:GetSecretValue` 권한을 해당 ARN에 부여
+- `OHTTP_SEEDS_SECRET_REF`를 사용할 경우 `INSTANCE_PROFILE_ARN`이 필요합니다.
 
 #### B) 다른 비밀 저장소 사용(예: SSM Parameter Store, Vault, S3 등)
 
@@ -339,8 +340,11 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 아니요. **GitHub Secrets에 `AWS_ROLE_ARN`을 등록하면** 워크플로가 자동으로 사용합니다.
 
 ### Q2. 왜 Instance Profile이 필요한가요?
-배포 스크립트가 **모든 서버에 Instance Profile을 부착**하도록 고정되어 있습니다.  
-AWS API를 쓰지 않더라도 **필수로 입력**해야 합니다.
+다음 조건에서는 필요합니다.
+- `OHTTP_SEEDS_SECRET_REF`로 seed를 조회할 때 (server-1에서 AWS API 호출)
+- public ECR이 아닌 레지스트리를 사용할 때
+
+public ECR 사용 + `OHTTP_SEEDS_JSON` 직접 입력이라면 **생략 가능**합니다.
 
 ### Q3. EIF는 꼭 필요하나요?
 Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.  
@@ -351,7 +355,7 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 ## 9) 요약
 
 1. AWS_ROLE_ARN을 GitHub Secrets에 등록
-2. 공개 레지스트리/네트워크/AMI/Instance Profile 준비
+2. 공개 레지스트리/네트워크/AMI 준비 (필요 시 Instance Profile)
 3. One-shot deploy 워크플로 실행
 
 여기까지 완료하면 GitHub Actions만으로 배포가 가능합니다.
