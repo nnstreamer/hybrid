@@ -2,11 +2,11 @@
 # Objective: Deploy OpenPCC server-3 (auth) to AWS EC2.
 # Usage examples:
 # - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... AUTH_SECURITY_GROUP_ID=... \
-#   AMI_ID=... INSTANCE_PROFILE_ARN=... SERVER3_CONFIG_PATH=server-3/config/server-3.sample.json \
+#   AMI_ID=... SERVER3_CONFIG_PATH=server-3/config/server-3.sample.json \
 #   ./scripts/deploy_server3.sh
 # - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... AUTH_SECURITY_GROUP_ID=... \
-#   AUTH_AMI_ID=... INSTANCE_PROFILE_ARN=... ./scripts/deploy_server3.sh /path/to/server-3.json
-# - Required: INSTANCE_PROFILE_ARN=... (optional: KEY_NAME=...)
+#   AUTH_AMI_ID=... ./scripts/deploy_server3.sh /path/to/server-3.json
+# - Optional: INSTANCE_PROFILE_ARN=... KEY_NAME=...
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -70,7 +70,6 @@ require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
 require_env AUTH_SECURITY_GROUP_ID
-require_env INSTANCE_PROFILE_ARN
 if [[ "${ECR_REGISTRY}" != public.ecr.aws/* ]]; then
   echo "ECR_REGISTRY must be a public ECR registry (public.ecr.aws/alias)." >&2
   exit 1
@@ -126,7 +125,9 @@ make_common_args() {
     --security-group-ids "${security_group_id}"
   )
 
-  args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
+    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  fi
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")
