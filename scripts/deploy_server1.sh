@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Objective: Deploy OpenPCC router (server-1) to AWS EC2.
 # Usage examples:
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... ./scripts/deploy_server1.sh
-# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... OHTTP_SEEDS_SECRET_REF=... ./scripts/deploy_server1.sh
-# - Optional: INSTANCE_PROFILE_ARN=... KEY_NAME=...
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... INSTANCE_PROFILE_ARN=... ./scripts/deploy_server1.sh
+# - AWS_REGION=us-east-1 ECR_REGISTRY=... SUBNET_ID=... ROUTER_SECURITY_GROUP_ID=... AMI_ID=... INSTANCE_PROFILE_ARN=... OHTTP_SEEDS_SECRET_REF=... ./scripts/deploy_server1.sh
+# - Required: INSTANCE_PROFILE_ARN=... (optional: KEY_NAME=...)
 # Notes:
 # - Requires AWS credentials in the environment.
 set -euo pipefail
@@ -41,6 +41,11 @@ require_env() {
 require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
+require_env INSTANCE_PROFILE_ARN
+if [[ "${ECR_REGISTRY}" != public.ecr.aws/* ]]; then
+  echo "ECR_REGISTRY must be a public ECR registry (public.ecr.aws/alias)." >&2
+  exit 1
+fi
 router_image_uri="${ECR_REGISTRY}/${ROUTER_IMAGE_NAME}:${IMAGE_TAG}"
 
 make_common_args() {
@@ -50,9 +55,7 @@ make_common_args() {
     --security-group-ids "${security_group_id}"
   )
 
-  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
-    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
-  fi
+  args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")

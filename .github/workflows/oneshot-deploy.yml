@@ -34,11 +34,11 @@ on:
         default: ""
       instance_profile_arn:
         type: string
-        description: Optional IAM instance profile ARN for EC2 (leave blank for public registry pulls)
+        description: Required IAM instance profile ARN for EC2
         default: ""
       image_registry:
         type: string
-        description: Public image registry base (e.g., public.ecr.aws/alias) when no instance profile
+        description: Public ECR registry base (e.g., public.ecr.aws/alias)
         default: ""
       key_name:
         type: string
@@ -258,17 +258,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.RESOLVED_AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        if: ${{ inputs.image_registry == '' && vars.OPENPCC_IMAGE_REGISTRY == '' }}
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Resolve image registry
         id: resolve-registry
         env:
           INPUT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
           VAR_IMAGE_REGISTRY: ${{ vars.OPENPCC_IMAGE_REGISTRY }}
-          PRIVATE_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -euo pipefail
           if [ -n "${INPUT_IMAGE_REGISTRY}" ]; then
@@ -276,17 +270,16 @@ jobs:
           elif [ -n "${VAR_IMAGE_REGISTRY}" ]; then
             resolved="${VAR_IMAGE_REGISTRY}"
           else
-            resolved="${PRIVATE_REGISTRY}"
+            echo "Missing image_registry. Set workflow input or OPENPCC_IMAGE_REGISTRY." >&2
+            exit 1
+          fi
+          if [[ "${resolved}" != public.ecr.aws/* ]]; then
+            echo "image_registry must be a public ECR registry (public.ecr.aws/alias)." >&2
+            exit 1
           fi
           echo "IMAGE_REGISTRY=${resolved}" >> "$GITHUB_ENV"
-          if [[ "${resolved}" == public.ecr.aws/* ]]; then
-            echo "IMAGE_REGISTRY_IS_PUBLIC=true" >> "$GITHUB_ENV"
-          else
-            echo "IMAGE_REGISTRY_IS_PUBLIC=false" >> "$GITHUB_ENV"
-          fi
 
       - name: Login to public ECR
-        if: ${{ env.IMAGE_REGISTRY_IS_PUBLIC == 'true' }}
         run: |
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
 
@@ -298,24 +291,14 @@ jobs:
           ENABLE_SERVER3: ${{ env.RESOLVED_ENABLE_SERVER3 }}
         run: |
           set -euo pipefail
-          IMAGE_REGISTRY_IS_PUBLIC="${IMAGE_REGISTRY_IS_PUBLIC:-false}"
           ensure_repo() {
             local name="$1"
-            if [[ "${IMAGE_REGISTRY_IS_PUBLIC}" == "true" ]]; then
-              local public_region="us-east-1"
-              if ! aws ecr-public describe-repositories --region "${public_region}" --repository-names "${name}" >/dev/null 2>&1; then
-                echo "Creating public ECR repository: ${name}"
-                aws ecr-public create-repository --region "${public_region}" --repository-name "${name}" >/dev/null
-              else
-                echo "Public ECR repository exists: ${name}"
-              fi
+            local public_region="us-east-1"
+            if ! aws ecr-public describe-repositories --region "${public_region}" --repository-names "${name}" >/dev/null 2>&1; then
+              echo "Creating public ECR repository: ${name}"
+              aws ecr-public create-repository --region "${public_region}" --repository-name "${name}" >/dev/null
             else
-              if ! aws ecr describe-repositories --region "${AWS_REGION}" --repository-names "${name}" >/dev/null 2>&1; then
-                echo "Creating ECR repository: ${name}"
-                aws ecr create-repository --region "${AWS_REGION}" --repository-name "${name}" >/dev/null
-              else
-                echo "ECR repository exists: ${name}"
-              fi
+              echo "Public ECR repository exists: ${name}"
             fi
           }
           ensure_repo "${ROUTER_IMAGE_NAME}"
@@ -328,7 +311,6 @@ jobs:
       - name: Validate stage A inputs
         run: |
           set -euo pipefail
-          IMAGE_REGISTRY_IS_PUBLIC="${IMAGE_REGISTRY_IS_PUBLIC:-false}"
           missing=0
           require() {
             local name="$1"
@@ -341,10 +323,8 @@ jobs:
           require "subnet_id" "${RESOLVED_SUBNET_ID}"
           require "router_security_group_id" "${RESOLVED_ROUTER_SECURITY_GROUP_ID}"
           require "ami_id" "${RESOLVED_AMI_ID}"
-          if [ -z "${RESOLVED_INSTANCE_PROFILE_ARN}" ] && [ "${IMAGE_REGISTRY_IS_PUBLIC}" != "true" ]; then
-            echo "instance_profile_arn is empty; set image_registry to a public registry (public.ecr.aws/alias)." >&2
-            missing=1
-          fi
+          require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          require "image_registry" "${IMAGE_REGISTRY}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi
@@ -678,17 +658,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.RESOLVED_AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        if: ${{ inputs.image_registry == '' && vars.OPENPCC_IMAGE_REGISTRY == '' }}
-        uses: aws-actions/amazon-ecr-login@v2
-
       - name: Resolve image registry
         id: resolve-registry
         env:
           INPUT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
           VAR_IMAGE_REGISTRY: ${{ vars.OPENPCC_IMAGE_REGISTRY }}
-          PRIVATE_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         run: |
           set -euo pipefail
           if [ -n "${INPUT_IMAGE_REGISTRY}" ]; then
@@ -696,17 +670,16 @@ jobs:
           elif [ -n "${VAR_IMAGE_REGISTRY}" ]; then
             resolved="${VAR_IMAGE_REGISTRY}"
           else
-            resolved="${PRIVATE_REGISTRY}"
+            echo "Missing image_registry. Set workflow input or OPENPCC_IMAGE_REGISTRY." >&2
+            exit 1
+          fi
+          if [[ "${resolved}" != public.ecr.aws/* ]]; then
+            echo "image_registry must be a public ECR registry (public.ecr.aws/alias)." >&2
+            exit 1
           fi
           echo "IMAGE_REGISTRY=${resolved}" >> "$GITHUB_ENV"
-          if [[ "${resolved}" == public.ecr.aws/* ]]; then
-            echo "IMAGE_REGISTRY_IS_PUBLIC=true" >> "$GITHUB_ENV"
-          else
-            echo "IMAGE_REGISTRY_IS_PUBLIC=false" >> "$GITHUB_ENV"
-          fi
 
       - name: Login to public ECR
-        if: ${{ env.IMAGE_REGISTRY_IS_PUBLIC == 'true' }}
         run: |
           aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
 
@@ -717,24 +690,14 @@ jobs:
           RELAY_IMAGE_NAME: ${{ env.SERVER4_IMAGE_NAME }}
         run: |
           set -euo pipefail
-          IMAGE_REGISTRY_IS_PUBLIC="${IMAGE_REGISTRY_IS_PUBLIC:-false}"
           ensure_repo() {
             local name="$1"
-            if [[ "${IMAGE_REGISTRY_IS_PUBLIC}" == "true" ]]; then
-              local public_region="us-east-1"
-              if ! aws ecr-public describe-repositories --region "${public_region}" --repository-names "${name}" >/dev/null 2>&1; then
-                echo "Creating public ECR repository: ${name}"
-                aws ecr-public create-repository --region "${public_region}" --repository-name "${name}" >/dev/null
-              else
-                echo "Public ECR repository exists: ${name}"
-              fi
+            local public_region="us-east-1"
+            if ! aws ecr-public describe-repositories --region "${public_region}" --repository-names "${name}" >/dev/null 2>&1; then
+              echo "Creating public ECR repository: ${name}"
+              aws ecr-public create-repository --region "${public_region}" --repository-name "${name}" >/dev/null
             else
-              if ! aws ecr describe-repositories --region "${AWS_REGION}" --repository-names "${name}" >/dev/null 2>&1; then
-                echo "Creating ECR repository: ${name}"
-                aws ecr create-repository --region "${AWS_REGION}" --repository-name "${name}" >/dev/null
-              else
-                echo "ECR repository exists: ${name}"
-              fi
+              echo "Public ECR repository exists: ${name}"
             fi
           }
           ensure_repo "${COMPUTE_IMAGE_NAME}"
@@ -743,7 +706,6 @@ jobs:
       - name: Validate stage B inputs
         run: |
           set -euo pipefail
-          IMAGE_REGISTRY_IS_PUBLIC="${IMAGE_REGISTRY_IS_PUBLIC:-false}"
           missing=0
           require() {
             local name="$1"
@@ -759,10 +721,8 @@ jobs:
           require "server1_router_url" "${SERVER1_ROUTER_URL}"
           require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
           require "ami_id" "${RESOLVED_AMI_ID}"
-          if [ -z "${RESOLVED_INSTANCE_PROFILE_ARN}" ] && [ "${IMAGE_REGISTRY_IS_PUBLIC}" != "true" ]; then
-            echo "instance_profile_arn is empty; set image_registry to a public registry (public.ecr.aws/alias)." >&2
-            missing=1
-          fi
+          require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
+          require "image_registry" "${IMAGE_REGISTRY}"
           if [ "${missing}" -ne 0 ]; then
             exit 1
           fi

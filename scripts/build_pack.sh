@@ -4,7 +4,7 @@
 # - COMPONENT=all ./scripts/build_pack.sh
 # - COMPONENT=server-1 IMAGE_TAG=dev ./scripts/build_pack.sh
 # - COMPONENT=server-2 BUILD_EIF=true ./scripts/build_pack.sh
-# - COMPONENT=all REGISTRY=123456789012.dkr.ecr.us-east-1.amazonaws.com PUSH=true ./scripts/build_pack.sh
+# - COMPONENT=all REGISTRY=public.ecr.aws/alias PUSH=true ./scripts/build_pack.sh
 # Notes:
 # - BUILD_EIF=true requires nitro-cli on the runner.
 # - Set IMAGE_TAG, REGISTRY, and PUSH to control tagging and pushing.
@@ -18,6 +18,17 @@ REGISTRY="${REGISTRY:-}"
 PUSH="${PUSH:-false}"
 BUILD_EIF="${BUILD_EIF:-false}"
 EIF_OUTPUT_DIR="${EIF_OUTPUT_DIR:-${ROOT_DIR}/artifacts}"
+
+if [[ "${PUSH}" == "true" ]]; then
+  if [[ -z "${REGISTRY}" ]]; then
+    echo "REGISTRY is required when PUSH=true." >&2
+    exit 1
+  fi
+  if [[ "${REGISTRY}" != public.ecr.aws/* ]]; then
+    echo "REGISTRY must be a public ECR registry (public.ecr.aws/alias)." >&2
+    exit 1
+  fi
+fi
 
 ROUTER_IMAGE_NAME="${ROUTER_IMAGE_NAME:-openpcc-router}"
 COMPUTE_IMAGE_NAME="${COMPUTE_IMAGE_NAME:-openpcc-compute}"

@@ -11,7 +11,7 @@
 - [ ] GitHub Actions Secrets에 AWS_ROLE_ARN 저장
 - [ ] 공개 레지스트리(ECR Public 등) 준비
 - [ ] VPC Subnet, Security Group 준비 (router/compute 분리 권장)
-- [ ] (선택) EC2 Instance Profile(역할) 준비
+- [ ] EC2 Instance Profile(역할) 준비
 - [ ] AMI ID(예: Ubuntu 22.04) 결정
 - [ ] GitHub Actions에서 One-shot deploy 워크플로 실행
 
@@ -40,9 +40,9 @@ Access Key는 사용하지 않습니다.
     `ecr-public:DescribeRepositories`, `ecr-public:BatchCheckLayerAvailability`,
     `ecr-public:InitiateLayerUpload`, `ecr-public:UploadLayerPart`,
     `ecr-public:CompleteLayerUpload`, `ecr-public:PutImage`
-  - **필수**: `sts:GetServiceBearerToken` (ECR Public 로그인/푸시용)
-  - 간단히는 `AmazonElasticContainerRegistryPublicFullAccess` 사용 가능
-- (선택) Instance Profile을 부착할 때의 `iam:PassRole`
+- **필수**: `sts:GetServiceBearerToken` (ECR Public 로그인/푸시용)
+- 간단히는 `AmazonElasticContainerRegistryPublicFullAccess` 사용 가능
+- Instance Profile을 부착할 때의 `iam:PassRole`
 
 ### 1-3. AWS_ROLE_ARN 확인 및 GitHub Secrets 등록
 
@@ -64,7 +64,8 @@ GitHub 리포지토리 → Settings → Secrets and variables → Actions 에 �
 
 ## 2) 공개 레지스트리 준비 (ECR Public 권장)
 
-이미지 빌드/푸시 및 배포를 위해 **로그인 없이 pull 가능한 공개 레지스트리**가 필요합니다.
+이미지 빌드/푸시 및 배포를 위해 **로그인 없이 pull 가능한 공개 레지스트리**가 필요합니다.  
+현재 워크플로는 **public ECR(public.ecr.aws/*)**만 허용합니다.
 
 ### 2-1. ECR 리포지토리 이름
 
@@ -97,10 +98,10 @@ AWS 콘솔 → ECR → Create repository
 
 ---
 
-## 4) EC2 Instance Profile(역할) 준비 (선택)
+## 4) EC2 Instance Profile(역할) 준비 (필수)
 
-현재 배포 스크립트는 인스턴스 내부에서 AWS API를 호출하지 않으므로 기본적으로 필요하지 않습니다.  
-Secrets Manager 등 **인스턴스에서 AWS API를 사용해야 할 때만** 준비하세요.
+모든 서버에 **Instance Profile을 부착**하도록 배포 스크립트가 고정되어 있습니다.  
+따라서 Instance Profile은 **필수 입력값**입니다.
 
 ### 4-1. IAM Role 생성
 
@@ -156,7 +157,8 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `router_security_group_id`
 - `compute_security_group_id`
 - `ami_id` (공통 AMI 또는 server별 AMI 기반)
-- `image_registry` (공개 레지스트리 사용 시) **또는** `instance_profile_arn` (프라이빗 레지스트리 사용 시)
+- `image_registry` (public.ecr.aws/alias)
+- `instance_profile_arn`
 - `auth_security_group_id` (enable_server3=true일 때)
 - `relay_security_group_id` (server-4 배포 스크립트를 사용할 때)
 
@@ -310,8 +312,8 @@ Variables 위치: GitHub 리포지토리 → Settings → Secrets and variables 
 아니요. **GitHub Secrets에 `AWS_ROLE_ARN`을 등록하면** 워크플로가 자동으로 사용합니다.
 
 ### Q2. 왜 Instance Profile이 필요한가요?
-현재 배포 스크립트는 **인스턴스 내부에서 AWS API를 사용하지 않으므로 기본적으로 필요하지 않습니다.**  
-Secrets Manager 등 **AWS API를 인스턴스에서 사용해야 할 때만** Instance Profile을 부여하세요.
+배포 스크립트가 **모든 서버에 Instance Profile을 부착**하도록 고정되어 있습니다.  
+AWS API를 쓰지 않더라도 **필수로 입력**해야 합니다.
 
 ### Q3. EIF는 꼭 필요하나요?
 Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.  
@@ -322,7 +324,7 @@ Nitro Enclaves를 쓰는 경우 EIF가 필요합니다.
 ## 9) 요약
 
 1. AWS_ROLE_ARN을 GitHub Secrets에 등록
-2. 공개 레지스트리/네트워크/AMI 준비 (필요 시 Instance Profile)
+2. 공개 레지스트리/네트워크/AMI/Instance Profile 준비
 3. One-shot deploy 워크플로 실행
 
 여기까지 완료하면 GitHub Actions만으로 배포가 가능합니다.
