@@ -87,7 +87,7 @@ on:
       enable_server3_ohttp_advertise:
         type: boolean
         description: Enable server-3 to advertise oHTTP relay URLs (requires relay URLs and seeds)
-        default: false
+        default: true
       enable_real_attestation_for_client:
         type: boolean
         description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
