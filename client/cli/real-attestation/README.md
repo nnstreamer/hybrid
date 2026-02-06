@@ -36,9 +36,37 @@ This CLI requires the `-ohttp` flag:
 - `-ohttp=enable` (relay + gateway)
 
 When `-ohttp=enable`, you must also set:
-- `RELAY_URL` (or `OPENPCC_RELAY_URL`)
 - `OHTTP_SEEDS_JSON` (or `OPENPCC_OHTTP_SEEDS_JSON`)
+
+The relay URL can be set directly **or** fetched from server-3 `/api/config`.
 `ROUTER_URL` is not required in this mode.
+
+### Option A) Relay URL 직접 지정
+```bash
+export RELAY_URL="http://<server4-public-ip>:3100"
+# or
+export OPENPCC_RELAY_URL="http://<server4-public-ip>:3100"
+```
+
+### Option B) server-3에서 relay URL 자동 추출
+```bash
+export SERVER3_URL="http://<server3-public-ip>:8080"
+# or
+export OPENPCC_SERVER3_URL="http://<server3-public-ip>:8080"
+```
+
+또는 `/etc/nnstreamer/hybrid.ini`:
+```ini
+server3_url=http://<server3-public-ip>:8080
+# (auth_url도 허용)
+```
+
+이 경우 실행 시 **server-3에서 relay_urls를 가져오는 로그가 출력**됩니다.
+
+### OHTTP seeds (필수)
+```bash
+export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-02-01T00:00:00Z","active_until":"2026-12-31T23:59:59Z"}]'
+```
 
 ## Configure identity policy (required for real attestation)
 Real attestation requires an OIDC identity policy. Provide it via env vars

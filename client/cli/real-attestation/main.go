@@ -39,6 +39,8 @@ const (
 	envAltRouterURL      = "OPENPCC_ROUTER_URL"
 	envRelayURL          = "RELAY_URL"
 	envAltRelayURL       = "OPENPCC_RELAY_URL"
+	envServer3URL        = "SERVER3_URL"
+	envAltServer3URL     = "OPENPCC_SERVER3_URL"
 	envOHTTPSeedsJSON    = "OHTTP_SEEDS_JSON"
 	envAltOHTTPSeedsJSON = "OPENPCC_OHTTP_SEEDS_JSON"
 	envModelName         = "MODEL_NAME"
@@ -53,6 +55,8 @@ const (
 	envSigstoreCachePath = "SIGSTORE_CACHE_PATH"
 	routerURLConfigKey   = "router_url"
 	relayURLConfigKey    = "relay_url"
+	server3URLConfigKey  = "server3_url"
+	authURLConfigKey     = "auth_url"
 	ohttpSeedsJSONKey    = "ohttp_seeds_json"
 	oidcIssuerConfigKey  = "oidc_issuer"
 	oidcIssuerRegexKey   = "oidc_issuer_regex"
@@ -157,6 +161,14 @@ type ohttpSeedSpec struct {
 type ohttpSeedsEnvelope struct {
 	OHTTPKeys  []ohttpSeedSpec `json:"OHTTP_KEYS"`
 	OHTTPSeeds []ohttpSeedSpec `json:"ohttp_seeds"`
+}
+
+type server3Config struct {
+	Features struct {
+		OHTTP           bool `json:"ohttp"`
+		RealAttestation bool `json:"real_attestation"`
+	} `json:"features"`
+	RelayURLs []string `json:"relay_urls"`
 }
 
 func parseOHTTPFlag(args []string) (bool, error) {
@@ -388,6 +400,21 @@ func resolveRelayURL(config map[string]string) (string, string, error) {
 	)
 }
 
+func resolveServer3URL(config map[string]string) (string, string) {
+	if value := strings.TrimSpace(os.Getenv(envAltServer3URL)); value != "" {
+		return normalizeURL(value), "env"
+	}
+	if value := strings.TrimSpace(os.Getenv(envServer3URL)); value != "" {
+		return normalizeURL(value), "env"
+	}
+	for _, key := range []string{server3URLConfigKey, authURLConfigKey} {
+		if value := strings.TrimSpace(config[key]); value != "" {
+			return normalizeURL(value), "config"
+		}
+	}
+	return "", ""
+}
+
 func resolveOHTTPSeedsJSON(config map[string]string) (string, string, error) {
 	if value := strings.TrimSpace(os.Getenv(envAltOHTTPSeedsJSON)); value != "" {
 		return value, "env", nil
@@ -405,6 +432,40 @@ func resolveOHTTPSeedsJSON(config map[string]string) (string, string, error) {
 		ohttpSeedsJSONKey,
 		configPath,
 	)
+}
+
+func fetchServer3Config(ctx context.Context, client *http.Client, server3URL string) (server3Config, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	baseURL := strings.TrimRight(server3URL, "/")
+	configURL := baseURL + "/api/config"
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, configURL, nil)
+	if err != nil {
+		return server3Config{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return server3Config{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return server3Config{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return server3Config{}, fmt.Errorf("server-3 config error: %s: %s", resp.Status, string(body))
+	}
+
+	var payload server3Config
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return server3Config{}, err
+	}
+	return payload, nil
 }
 
 func resolveIdentityPolicy(config map[string]string) (transparency.IdentityPolicy, string, error) {
@@ -563,6 +624,7 @@ func main() {
 
 	model := firstNonEmpty(os.Getenv(envModelName), defaultModel)
 	prompt := firstNonEmpty(os.Getenv(envPromptText), defaultPrompt)
+	nonAnonClient := newProxyHTTPClient()
 
 	var routerURL string
 	var routerSource string
@@ -570,12 +632,37 @@ func main() {
 	var relaySource string
 	var seedsJSON string
 	var seedsSource string
+	var server3URL string
+	var server3Source string
+	var server3Payload *server3Config
 
 	if ohttpEnabled {
+		server3URL, server3Source = resolveServer3URL(config)
+		if server3URL != "" {
+			fmt.Fprintf(os.Stderr, "Fetching server-3 config (%s): %s/api/config\n", server3Source, strings.TrimRight(server3URL, "/"))
+			payload, fetchErr := fetchServer3Config(context.Background(), nonAnonClient, server3URL)
+			if fetchErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to fetch server-3 config: %v\n", fetchErr)
+			} else {
+				server3Payload = &payload
+				fmt.Fprintf(os.Stderr, "server-3 features: ohttp=%t real_attestation=%t\n", payload.Features.OHTTP, payload.Features.RealAttestation)
+				if len(payload.RelayURLs) > 0 {
+					fmt.Fprintf(os.Stderr, "server-3 relay_urls: %s\n", strings.Join(payload.RelayURLs, ", "))
+				} else {
+					fmt.Fprintln(os.Stderr, "server-3 relay_urls: <empty>")
+				}
+			}
+		}
+
 		relayURL, relaySource, err = resolveRelayURL(config)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to resolve relay URL: %v\n", err)
-			os.Exit(1)
+			if server3Payload != nil && len(server3Payload.RelayURLs) > 0 {
+				relayURL = server3Payload.RelayURLs[0]
+				relaySource = "server-3"
+			} else {
+				fmt.Fprintf(os.Stderr, "Failed to resolve relay URL: %v\n", err)
+				os.Exit(1)
+			}
 		}
 		seedsJSON, seedsSource, err = resolveOHTTPSeedsJSON(config)
 		if err != nil {
@@ -623,7 +710,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	nonAnonClient := newProxyHTTPClient()
 	options := []openpcc.Option{
 		openpcc.WithWallet(&fixedWallet{}),
 		openpcc.WithNonAnonHTTPClient(nonAnonClient),
