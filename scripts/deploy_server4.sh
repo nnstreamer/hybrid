@@ -3,7 +3,7 @@
 # Usage examples:
 # - RELAY_UPSTREAM_GATEWAY_URL=http://10.0.1.23:3200 AWS_REGION=us-east-1 \
 #   ECR_REGISTRY=... SUBNET_ID=... RELAY_SECURITY_GROUP_ID=... \
-#   INSTANCE_PROFILE_ARN=... AMI_ID=... ./scripts/deploy_server4.sh
+#   AMI_ID=... ./scripts/deploy_server4.sh
 # Notes:
 # - Requires AWS credentials in the environment.
 set -euo pipefail
@@ -39,8 +39,11 @@ require_env AWS_REGION
 require_env ECR_REGISTRY
 require_env SUBNET_ID
 require_env RELAY_SECURITY_GROUP_ID
-require_env INSTANCE_PROFILE_ARN
 require_env RELAY_UPSTREAM_GATEWAY_URL
+if [[ -z "${INSTANCE_PROFILE_ARN}" && "${ECR_REGISTRY}" != public.ecr.aws/* ]]; then
+  echo "INSTANCE_PROFILE_ARN is required for private registries." >&2
+  exit 1
+fi
 
 if [[ -z "${RELAY_AMI_ID}" ]]; then
   echo "Missing required environment variable: RELAY_AMI_ID or AMI_ID" >&2
@@ -54,8 +57,10 @@ make_common_args() {
   local args=(
     --subnet-id "${SUBNET_ID}"
     --security-group-ids "${security_group_id}"
-    --iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}"
   )
+  if [[ -n "${INSTANCE_PROFILE_ARN}" ]]; then
+    args+=(--iam-instance-profile "Arn=${INSTANCE_PROFILE_ARN}")
+  fi
 
   if [[ -n "${KEY_NAME}" ]]; then
     args+=(--key-name "${KEY_NAME}")
@@ -74,7 +79,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y docker.io awscli
 systemctl enable --now docker
-aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+if [[ "${ECR_REGISTRY}" == public.ecr.aws/* ]]; then
+  echo "Public ECR registry detected; skipping docker login."
+else
+  aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${ECR_REGISTRY}"
+fi
 docker pull "${relay_image_uri}"
 # NOTE: Ensure the relay security group allows TCP 3100 (relay).
 docker run -d --restart unless-stopped --name openpcc-relay -p 3100:3100 \
