@@ -43,6 +43,7 @@ OpenPCC 표준을 기반으로, v0.001 프로토타입 아키텍처를 v0.002로
 - Nitro Enclave 내에서 추론 수행(요청 복호화 종단)
 - Real Attestation evidence 생성/제공 (검증은 기본적으로 client 측에서 수행하는 것을 원칙으로 함)
 - v0.002는 “Real Attestation을 사용할 수 있는 구조”를 명시하며, 구체 evidence 포맷/검증 정책은 구성(또는 향후 문서)로 분리 가능
+- v0.002 Nitro Enclave 환경에서는 NSM attestation document를 TEE evidence로 포함한다
 
 ### `server-3` (Auth)
 

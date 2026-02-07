@@ -224,3 +224,40 @@ go run . -ohttp=disable
 
 - `fake_attestation` 실행 결과가 2xx 응답이며 본문이 출력됨
 
+---
+
+## 11) real-attestation CLI (Nitro Enclave, oHTTP 경로)
+
+> 이 경로는 `client/cli/real-attestation`을 사용합니다.  
+> server-3의 `/api/config`에서 relay URL을 자동 추출하며,  
+> **검증 실패 시에도 5줄 경고 출력 후 계속 진행**하도록 기본 설정됩니다
+> (성능 비교용 경로 유지 목적).
+
+### 11-1. 준비
+
+- `server-1/2/3/4`가 실행 중인지 확인
+- `SERVER3_URL`, `OHTTP_SEEDS_JSON` 준비
+- OIDC 정책 값 준비 (`OPENPCC_OIDC_ISSUER`, `OPENPCC_OIDC_SUBJECT` 또는 regex)
+
+### 11-2. 실행 예시
+
+```bash
+export SERVER3_URL="http://<server3-public-ip>:8080"
+export OHTTP_SEEDS_JSON='<seeds-json-here>'
+export OPENPCC_OIDC_ISSUER="https://oidc.example.com"
+export OPENPCC_OIDC_SUBJECT="user@example.com"
+
+cd client/cli/real-attestation
+go run . -ohttp=enable
+```
+
+### 11-3. 경고 출력 예시
+
+```
+********************
+* REAL ATTEST WARN *
+* node_id=...      *
+* verify failed... *
+********************
+```
+

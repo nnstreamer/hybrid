@@ -68,6 +68,10 @@ server3_url=http://<server3-public-ip>:8080
 export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-02-01T00:00:00Z","active_until":"2026-12-31T23:59:59Z"}]'
 ```
 
+## Verification warning (기본 동작)
+real-attestation 검증이 실패하면 **5줄 경고를 출력한 뒤 계속 진행**합니다.
+이는 개발자 시험/성능 비교 목적의 기본 동작입니다.
+
 ## Configure identity policy (required for real attestation)
 Real attestation requires an OIDC identity policy. Provide it via env vars
 or `/etc/nnstreamer/hybrid.ini`.

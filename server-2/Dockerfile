@@ -18,7 +18,9 @@ WORKDIR /src
 
 ARG CONFIDENTCOMPUTE_REF=main
 ARG COMPUTE_BOOT_BUILD_TAGS=
-RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git .
+COPY patches/confidentcompute-nitro.patch /tmp/confidentcompute-nitro.patch
+RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git . \
+  && git apply /tmp/confidentcompute-nitro.patch
 
 RUN go mod download
 
