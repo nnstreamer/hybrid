@@ -371,6 +371,50 @@ docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
 nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
 rm -rf "\${CONFIG_DIR}"
 
+systemctl start openpcc-enclave.service
+
+if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1; then
+  export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=${TPM_SIMULATOR_CMD_PORT}"
+  rek_hash=""
+  for i in $(seq 1 30); do
+    if tpm2_readpublic -c 0x81000002 -o /tmp/rek.pub >/dev/null 2>&1; then
+      rek_hash=$(sha256sum /tmp/rek.pub | awk '{print $1}')
+      break
+    fi
+    sleep 10
+  done
+  if [ -n "${rek_hash}" ]; then
+    TOKEN="$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+    if [ -n "${TOKEN}" ]; then
+      INSTANCE_ID="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/placement/region || true)"
+    else
+      INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="$(curl -s http://169.254.169.254/latest/meta-data/placement/region || true)"
+    fi
+    if [ -z "${REGION}" ]; then
+      if [ -n "${TOKEN}" ]; then
+        AZ="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+      else
+        AZ="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+      fi
+      REGION="${AZ::-1}"
+    fi
+    if [ -n "${INSTANCE_ID}" ] && [ -n "${REGION}" ]; then
+      aws ec2 create-tags \
+        --region "${REGION}" \
+        --resources "${INSTANCE_ID}" \
+        --tags "Key=openpcc:rek_hash,Value=sha256:${rek_hash}" || true
+    else
+      echo "Failed to resolve instance metadata for tagging." >&2
+    fi
+  else
+    echo "Failed to compute REK hash for tagging." >&2
+  fi
+else
+  echo "awscli or tpm2-tools not installed; skipping REK tag update." >&2
+fi
+
 mv \$0 /
 reboot now
 EOF
@@ -382,7 +426,7 @@ script_after_reboot_b64=$(gzip -c "${user_data_after_reboot}" | base64 -w 0)
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip
+apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip awscli tpm2-tools
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" <<'INEOF'
 ${script_after_reboot_b64}
