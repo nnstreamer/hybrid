@@ -71,7 +71,7 @@ on:
       enable_fake_attestation_for_server2:
         type: boolean
         description: Enable fake attestation for server-2 build (do not combine with real attestation for client)
-        default: true
+        default: false
       enclave_cpu_count:
         type: string
         description: Enclave CPU count
@@ -91,7 +91,7 @@ on:
       enable_real_attestation_for_client:
         type: boolean
         description: Enable real attestation policy for clients (do not combine with fake attestation for server-2)
-        default: false
+        default: true
 
 env:
   IMAGE_TAG: ${{ github.sha }}
