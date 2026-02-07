@@ -283,6 +283,8 @@ aws secretsmanager create-secret \
   - `openpcc-vsock-router`, `openpcc-vsock-tpm-*`: Enclave → Router/TPM 접근용 VSOCK 프록시
   - `openpcc-enclave-health-proxy`: Router → Enclave(8081) 헬스체크 프록시
 - **운영 환경에서는 TPM Simulator를 제거**하고 **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
+- v0.002 기준 구현은 **Nitro Enclave(NSM) attestation document를 TEE evidence로 포함**합니다.
+- 개발/시험 환경에서는 TPM simulator를 유지하되, **client real-attestation CLI는 검증 실패 시 경고 후 계속 진행**하도록 기본 설정됩니다.
 - `enclave_cid`는 **VSOCK 주소 식별자**이며, 호스트가 Enclave로 연결할 때 사용합니다.
   - 기본값(16)으로 동작하도록 구성되어 있으며, 변경 시 **호스트/Enclave 프록시가 동일 값**을 사용해야 합니다.
 - TPM 시뮬레이터 포트는 기본적으로 **2321/2322**를 사용하며, 배포 스크립트는 platform 포트를 **cmd 포트 + 1**로 보정합니다.

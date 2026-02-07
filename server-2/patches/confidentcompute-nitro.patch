@@ -1,0 +1,309 @@
+diff --git a/computeboot/evidence.go b/computeboot/evidence.go
+index e1f6d2b..9a92b5f 100644
+--- a/computeboot/evidence.go
++++ b/computeboot/evidence.go
+@@ -39,13 +39,7 @@ import (
+ )
+ 
+ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevice, gpuManager GPUManager, tlogCfg *TransparencyConfig) (ev.SignedEvidenceList, error) {
+ 	result := ev.SignedEvidenceList{}
+-	var teeType ev.TEEType
+-
+-	teeType, err := attest.GetTEEType()
+-	if err != nil {
+-		return nil, err
+-	}
+ 
+ 	tpm, err := tpmDevice.OpenDevice()
+ 	if err != nil {
+@@ -66,68 +60,79 @@ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevice
+ 		return nil, errors.New("array longer than 64 bytes")
+ 	}
+ 
+-	switch teeType {
+-	case ev.Tdx:
+-		switch tpmCfg.TPMType {
+-		case GCE:
+-			teeAttestor, err := attest.NewTDXTEEAttestor(
+-				tpmQuoteHashPadded,
+-			)
++	if isNitroEnclave() {
++		nitroEvidence, err := createNitroAttestationEvidence(tpmQuoteHashPadded)
++		if err != nil {
++			return nil, fmt.Errorf("nitro attestation failed: %w", err)
++		}
++		result = append(result, nitroEvidence)
++	} else {
++		teeType, err := attest.GetTEEType()
++		if err != nil {
++			return nil, err
++		}
+ 
+-			if err != nil {
+-				return nil, err
+-			}
++		switch teeType {
++		case ev.Tdx:
++			switch tpmCfg.TPMType {
++			case GCE:
++				teeAttestor, err := attest.NewTDXTEEAttestor(
++					tpmQuoteHashPadded,
++				)
+ 
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-			if err != nil {
+-				return nil, fmt.Errorf("gce tdx create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
++				if err != nil {
++					return nil, err
++				}
+ 
+-			collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				if err != nil {
++					return nil, fmt.Errorf("gce tdx create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("gce tdx collateral failed: %w", err)
+-			}
++				collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
+ 
+-			result = append(result, collateralEvidence)
+-		case Azure:
+-			teeAttestor := attest.NewAzureTDXTEEAttestorWithQuoteService(
+-				tpm,
+-				tpmQuoteHashPadded,
+-				&attest.HTTPMetadataQuoteService{},
+-			)
++				if err != nil {
++					return nil, fmt.Errorf("gce tdx collateral failed: %w", err)
++				}
+ 
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				result = append(result, collateralEvidence)
++			case Azure:
++				teeAttestor := attest.NewAzureTDXTEEAttestorWithQuoteService(
++					tpm,
++					tpmQuoteHashPadded,
++					&attest.HTTPMetadataQuoteService{},
++				)
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("azure tdx create evidence failed: %w", err)
+-			}
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+ 
+-			result = append(result, teeEvidencePiece)
++				if err != nil {
++					return nil, fmt.Errorf("azure tdx create evidence failed: %w", err)
++				}
+ 
+-			collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
++				result = append(result, teeEvidencePiece)
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("azure tdx collateral failed: %w", err)
+-			}
++				collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
+ 
+-			result = append(result, collateralEvidence)
+-		case Simulator, InMemorySimulator, QEMU:
+-			// these do nothing, but we have to have this comment for revive:useless-fallthrough
+-			fallthrough
+-		default:
+-			return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+-		}
+-	case ev.SevSnp:
+-		switch tpmCfg.TPMType {
+-		case GCE:
+-			teeAttestor, err := attest.NewSEVSNPTEEAttestor(
+-				tpmQuoteHashPadded,
+-			)
++				if err != nil {
++					return nil, fmt.Errorf("azure tdx collateral failed: %w", err)
++				}
+ 
+-			if err != nil {
+-				return nil, err
+-			}
++				result = append(result, collateralEvidence)
++			case Simulator, InMemorySimulator, QEMU:
++				// these do nothing, but we have to have this comment for revive:useless-fallthrough
++				fallthrough
++			default:
++				return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
++			}
++		case ev.SevSnp:
++			switch tpmCfg.TPMType {
++			case GCE:
++				teeAttestor, err := attest.NewSEVSNPTEEAttestor(
++					tpmQuoteHashPadded,
++				)
+ 
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				if err != nil {
++					return nil, err
++				}
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("gce sevsnp create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
+-		case Azure:
+-			teeAttestor := attest.NewAzureSEVSNPTEEAttestor(
+-				tpm,
+-				tpmQuoteHashPadded,
+-			)
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+ 
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				if err != nil {
++					return nil, fmt.Errorf("gce sevsnp create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
++			case Azure:
++				teeAttestor := attest.NewAzureSEVSNPTEEAttestor(
++					tpm,
++					tpmQuoteHashPadded,
++				)
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("azure sevsnp create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
+-		case QEMU:
+-			teeAttestor, err := attest.NewBareMetalSEVSNPTEEAttestor(tpmQuoteHashPadded)
+-			if err != nil {
+-				return nil, err
+-			}
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+ 
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				if err != nil {
++					return nil, fmt.Errorf("azure sevsnp create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
++			case QEMU:
++				teeAttestor, err := attest.NewBareMetalSEVSNPTEEAttestor(tpmQuoteHashPadded)
++				if err != nil {
++					return nil, err
++				}
+ 
+-			if err != nil {
+-				return nil, fmt.Errorf("qemu sevsnp create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
+-		case Simulator, InMemorySimulator:
+-			// these two do nothing, but we have to have this comment for revive:useless-fallthrough
+-			fallthrough
+-		default:
+-			return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+-		}
+-	case ev.NoTEE:
+-		return nil, errors.New("not running in a TEE")
+-	default:
+-		return nil, fmt.Errorf("unsupported TEE type: %d", teeType)
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++
++				if err != nil {
++					return nil, fmt.Errorf("qemu sevsnp create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
++			case Simulator, InMemorySimulator:
++				// these two do nothing, but we have to have this comment for revive:useless-fallthrough
++				fallthrough
++			default:
++				return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
++			}
++		case ev.NoTEE:
++			return nil, errors.New("not running in a TEE")
++		default:
++			return nil, fmt.Errorf("unsupported TEE type: %d", teeType)
++		}
+ 	}
+ 
+@@ -208,13 +208,9 @@
+ 	switch tpmCfg.TPMType {
+-	case QEMU:
++	case QEMU, Simulator, InMemorySimulator:
+ 		// instead of attesting the AK certificate, we include the AK TPMT public area in the evidence,
+ 		// and verify that it matches the vTPM TPMT public area in the SEV-SNP services manifest
+ 		tpmtAttestor := attest.NewTPMTPublicAttestor(tpm, tpmutil.Handle(tpmCfg.AttestationKeyHandle), ev.AkTPMTPublic)
+ 		akTPMPTEvidence, err := tpmtAttestor.CreateSignedEvidence(context.Background())
+ 		if err != nil {
+ 			return nil, fmt.Errorf("tpmt create signed evidence failed: %w", err)
+ 		}
+ 		result = append(result, akTPMPTEvidence)
+-	case Simulator, InMemorySimulator:
+-		// these two do nothing, but we have to have this comment for revive:useless-fallthrough
+-		fallthrough
+ 	default:
+ 		return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+ 	}
+diff --git a/computeboot/nitro_attest.go b/computeboot/nitro_attest.go
+new file mode 100644
+index 0000000..7867602
+--- /dev/null
++++ b/computeboot/nitro_attest.go
+@@ -0,0 +1,61 @@
++package computeboot
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/hf/nsm"
++	"github.com/hf/nsm/request"
++	ev "github.com/openpcc/openpcc/attestation/evidence"
++)
++
++func isNitroEnclave() bool {
++	_, err := os.Stat("/dev/nsm")
++	return err == nil
++}
++
++func createNitroAttestationEvidence(nonce []byte) (*ev.SignedEvidencePiece, error) {
++	if len(nonce) == 0 {
++		return nil, fmt.Errorf("nitro attestation nonce missing")
++	}
++
++	session, err := nsm.OpenDefaultSession()
++	if err != nil {
++		return nil, fmt.Errorf("open nsm session: %w", err)
++	}
++	defer session.Close()
++
++	resp, err := session.Send(&request.Attestation{
++		Nonce: nonce,
++	})
++	if err != nil {
++		return nil, fmt.Errorf("nsm attestation failed: %w", err)
++	}
++	if resp.Error != "" {
++		return nil, fmt.Errorf("nsm attestation error: %s", resp.Error)
++	}
++	if resp.Attestation == nil || len(resp.Attestation.Document) == 0 {
++		return nil, fmt.Errorf("nsm attestation document missing")
++	}
++
++	return &ev.SignedEvidencePiece{
++		Type:      ev.SevSnpExtendedReport,
++		Data:      resp.Attestation.Document,
++		Signature: []byte{},
++	}, nil
++}
+diff --git a/go.mod b/go.mod
+index 30a8bd0..5f4a1ad 100644
+--- a/go.mod
++++ b/go.mod
+@@ -17,6 +17,7 @@ require (
+ 	github.com/felixge/fgprof v0.9.5
+ 	github.com/golang-jwt/jwt/v5 v5.3.0
+ 	github.com/google/go-tdx-guest v0.3.2-0.20250814004405-ffb0869e6f4d
+ 	github.com/google/go-tpm v0.9.7
++	github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9
+ 	github.com/lmittmann/tint v1.1.2
+ 	github.com/mattn/go-isatty v0.0.20
