@@ -773,6 +773,198 @@ jobs:
       SERVER1_ROUTER_URL: ${{ needs.stage-a.outputs.server1_router_url }}
       SERVER1_GATEWAY_URL: ${{ needs.stage-a.outputs.server1_gateway_url }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate AWS_ROLE_ARN
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AWS_ROLE_ARN}" ]; then
+            echo "::error::Missing GitHub Actions secret AWS_ROLE_ARN."
+            echo "::error::Set AWS_ROLE_ARN to the IAM Role ARN for GitHub Actions OIDC."
+            echo "::error::Do not use Instance Profile ARN here."
+            echo "::error::AWS Console: IAM -> Roles -> <role> -> ARN"
+            echo "::error::CLI: aws iam get-role --role-name <ROLE_NAME> --query Role.Arn --output text"
+            exit 1
+          fi
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.RESOLVED_AWS_REGION }}
+
+      - name: Resolve image registry
+        id: resolve-registry
+        env:
+          INPUT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
+          VAR_IMAGE_REGISTRY: ${{ vars.OPENPCC_IMAGE_REGISTRY }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_IMAGE_REGISTRY}" ]; then
+            resolved="${INPUT_IMAGE_REGISTRY}"
+          elif [ -n "${VAR_IMAGE_REGISTRY}" ]; then
+            resolved="${VAR_IMAGE_REGISTRY}"
+          else
+            echo "Missing image_registry. Set workflow input or OPENPCC_IMAGE_REGISTRY." >&2
+            exit 1
+          fi
+          if [[ "${resolved}" != public.ecr.aws/* ]]; then
+            echo "image_registry must be a public ECR registry (public.ecr.aws/alias)." >&2
+            exit 1
+          fi
+          echo "IMAGE_REGISTRY=${resolved}" >> "$GITHUB_ENV"
+
+      - name: Login to public ECR
+        run: |
+          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+
+      - name: Resolve server-2 instance
+        if: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT == 'true' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          instance_id=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --filters "Name=tag:Name,Values=openpcc-compute" "Name=instance-state-name,Values=pending,running" \
+            --query "Reservations[].Instances[].InstanceId | [0]" \
+            --output text)
+          if [ -z "${instance_id}" ] || [ "${instance_id}" = "None" ]; then
+            echo "Failed to find running server-2 instance (tag Name=openpcc-compute)." >&2
+            exit 1
+          fi
+          echo "SERVER2_INSTANCE_ID=${instance_id}" >> "${GITHUB_ENV}"
+          aws ec2 wait instance-status-ok --region "${AWS_REGION}" --instance-ids "${instance_id}"
+
+      - name: Wait for server-2 SSM availability
+        if: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT == 'true' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          SERVER2_INSTANCE_ID: ${{ env.SERVER2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            count=$(aws ssm describe-instance-information \
+              --region "${AWS_REGION}" \
+              --filters "Key=InstanceIds,Values=${SERVER2_INSTANCE_ID}" \
+              --query "length(InstanceInformationList)" \
+              --output text)
+            if [ "${count}" != "0" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "server-2 is not registered in SSM. Ensure the AMI has amazon-ssm-agent installed and instance_profile_arn includes AmazonSSMManagedInstanceCore." >&2
+          exit 1
+
+      - name: Resolve compute image digest
+        if: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT == 'true' }}
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          digest=""
+          for i in $(seq 1 12); do
+            digest=$(aws ecr-public describe-images \
+              --region us-east-1 \
+              --repository-name openpcc-compute \
+              --image-ids imageTag="${IMAGE_TAG}" \
+              --query "imageDetails[0].imageDigest" \
+              --output text || true)
+            if [ -n "${digest}" ] && [ "${digest}" != "None" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "${digest}" ] || [ "${digest}" = "None" ]; then
+            echo "Failed to resolve compute image digest for tag ${IMAGE_TAG}." >&2
+            exit 1
+          fi
+          echo "COMPUTE_IMAGE_DIGEST=${digest}" >> "${GITHUB_ENV}"
+
+      - name: Resolve REK hash from server-2
+        if: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT == 'true' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          SERVER2_INSTANCE_ID: ${{ env.SERVER2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          commands_json=$(python3 - <<'PY'
+          import json
+          commands = [
+              "set -euo pipefail",
+              "if ! command -v tpm2_readpublic >/dev/null 2>&1; then apt-get update && apt-get install -y tpm2-tools; fi",
+              "export TPM2TOOLS_TCTI='mssim:host=127.0.0.1,port=2321'",
+              "for i in $(seq 1 30); do if tpm2_readpublic -c 0x81000002 -o /tmp/rek.pub; then sha256sum /tmp/rek.pub | awk '{print $1}'; exit 0; fi; sleep 10; done; echo 'REK handle not ready' >&2; exit 1",
+          ]
+          print(json.dumps(commands))
+          PY
+          )
+          command_id=$(aws ssm send-command \
+            --region "${AWS_REGION}" \
+            --instance-ids "${SERVER2_INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands="${commands_json}" \
+            --query "Command.CommandId" \
+            --output text)
+          aws ssm wait command-executed \
+            --region "${AWS_REGION}" \
+            --command-id "${command_id}" \
+            --instance-id "${SERVER2_INSTANCE_ID}"
+          output=$(aws ssm get-command-invocation \
+            --region "${AWS_REGION}" \
+            --command-id "${command_id}" \
+            --instance-id "${SERVER2_INSTANCE_ID}" \
+            --query "StandardOutputContent" \
+            --output text)
+          rek_hash=$(echo "${output}" | tr -d '\r' | grep -Eo '[a-f0-9]{64}' | tail -n1)
+          if [ -z "${rek_hash}" ]; then
+            echo "Failed to extract REK hash from server-2 output." >&2
+            echo "${output}" >&2
+            exit 1
+          fi
+          echo "TPM_REK_HASH=sha256:${rek_hash}" >> "${GITHUB_ENV}"
+
+      - name: Resolve attestation defaults
+        if: ${{ env.RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT == 'true' }}
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+          COMPUTE_IMAGE_DIGEST: ${{ env.COMPUTE_IMAGE_DIGEST }}
+          TPM_REK_HASH: ${{ env.TPM_REK_HASH }}
+          RESOLVED_ATTESTATION_POLICY_ID: ${{ env.RESOLVED_ATTESTATION_POLICY_ID }}
+          RESOLVED_ATTESTATION_ALLOWED_JSON: ${{ env.RESOLVED_ATTESTATION_ALLOWED_JSON }}
+          RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON: ${{ env.RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RESOLVED_ATTESTATION_POLICY_ID}" ]; then
+            echo "RESOLVED_ATTESTATION_POLICY_ID=policy-${IMAGE_TAG}" >> "${GITHUB_ENV}"
+          fi
+          if [ -z "${RESOLVED_ATTESTATION_ALLOWED_JSON}" ]; then
+            allowed_json=$(python3 - <<'PY'
+          import json
+          import os
+          payload = {
+              "image_hashes": [os.environ["COMPUTE_IMAGE_DIGEST"]],
+              "tpm_rek_hashes": [os.environ["TPM_REK_HASH"]],
+          }
+          print(json.dumps(payload, separators=(",", ":")))
+          PY
+            )
+            echo "RESOLVED_ATTESTATION_ALLOWED_JSON=${allowed_json}" >> "${GITHUB_ENV}"
+          fi
+          if [ -z "${RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON}" ]; then
+            hints_json=$(python3 - <<'PY'
+          import json
+          payload = {"type": "aws-nitro", "mode": "default"}
+          print(json.dumps(payload, separators=(",", ":")))
+          PY
+            )
+            echo "RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON=${hints_json}" >> "${GITHUB_ENV}"
+          fi
+
       - name: Preflight validate server-3 config inputs
         env:
           ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE }}
@@ -793,7 +985,6 @@ jobs:
           python3 - <<'PY'
           import json
           import os
-          import sys
 
           def parse_bool(value, name, default):
               if value is None or str(value).strip() == "":
@@ -868,9 +1059,9 @@ jobs:
               policy_id = os.getenv("ATTESTATION_POLICY_ID", "")
               allowed_raw = os.getenv("ATTESTATION_ALLOWED_JSON", "")
               hints_raw = os.getenv("ATTESTATION_VERIFIER_HINTS_JSON", "")
-              require("OPENPCC_ATTESTATION_POLICY_ID", policy_id, "repo variable")
-              require("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw, "repo variable/secret")
-              require("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw, "repo variable/secret")
+              require("OPENPCC_ATTESTATION_POLICY_ID", policy_id, "repo variable or auto-generated")
+              require("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw, "repo variable/secret or auto-generated")
+              require("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw, "repo variable/secret or auto-generated")
               parse_json("OPENPCC_ATTESTATION_ALLOWED_JSON", allowed_raw, dict)
               parse_json("OPENPCC_ATTESTATION_VERIFIER_HINTS_JSON", hints_raw, dict)
 
@@ -880,54 +1071,6 @@ jobs:
                   print(f"- {item}")
               raise SystemExit(1)
           PY
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Validate AWS_ROLE_ARN
-        env:
-          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${AWS_ROLE_ARN}" ]; then
-            echo "::error::Missing GitHub Actions secret AWS_ROLE_ARN."
-            echo "::error::Set AWS_ROLE_ARN to the IAM Role ARN for GitHub Actions OIDC."
-            echo "::error::Do not use Instance Profile ARN here."
-            echo "::error::AWS Console: IAM -> Roles -> <role> -> ARN"
-            echo "::error::CLI: aws iam get-role --role-name <ROLE_NAME> --query Role.Arn --output text"
-            exit 1
-          fi
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.RESOLVED_AWS_REGION }}
-
-      - name: Resolve image registry
-        id: resolve-registry
-        env:
-          INPUT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
-          VAR_IMAGE_REGISTRY: ${{ vars.OPENPCC_IMAGE_REGISTRY }}
-        run: |
-          set -euo pipefail
-          if [ -n "${INPUT_IMAGE_REGISTRY}" ]; then
-            resolved="${INPUT_IMAGE_REGISTRY}"
-          elif [ -n "${VAR_IMAGE_REGISTRY}" ]; then
-            resolved="${VAR_IMAGE_REGISTRY}"
-          else
-            echo "Missing image_registry. Set workflow input or OPENPCC_IMAGE_REGISTRY." >&2
-            exit 1
-          fi
-          if [[ "${resolved}" != public.ecr.aws/* ]]; then
-            echo "image_registry must be a public ECR registry (public.ecr.aws/alias)." >&2
-            exit 1
-          fi
-          echo "IMAGE_REGISTRY=${resolved}" >> "$GITHUB_ENV"
-
-      - name: Login to public ECR
-        run: |
-          aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
 
       - name: Ensure ECR repositories (server-3)
         env:
