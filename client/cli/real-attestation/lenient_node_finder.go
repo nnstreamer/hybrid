@@ -12,6 +12,7 @@ import (
 	"github.com/openpcc/openpcc/ahttp"
 	"github.com/openpcc/openpcc/anonpay"
 	"github.com/openpcc/openpcc/attestation/verify"
+	"github.com/openpcc/openpcc/auth/credentialing"
 	rtrpb "github.com/openpcc/openpcc/gen/protos/router"
 	"github.com/openpcc/openpcc/httpfmt"
 	"github.com/openpcc/openpcc/httpretry"
@@ -120,6 +121,14 @@ func (f *lenientNodeFinder) FindVerifiedNodes(ctx context.Context, maxNodes int,
 
 func (*lenientNodeFinder) ListCachedVerifiedNodes() ([]openpcc.VerifiedNode, error) {
 	return nil, nil
+}
+
+func (f *lenientNodeFinder) GetBadge(ctx context.Context) (credentialing.Badge, error) {
+	return f.authClient.GetBadge(ctx)
+}
+
+func (*lenientNodeFinder) Close() error {
+	return nil
 }
 
 func encodeCreditHeader(credit *anonpay.BlindedCredit) (string, error) {
