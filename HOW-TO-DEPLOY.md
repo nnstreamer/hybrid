@@ -177,6 +177,7 @@ Stage A(server-1 + server-4) → Stage B(server-2) → Stage C(server-3) 순서�
 Stage C는 server-2의 **REK tag/이미지 digest**를 확인한 뒤 server-3 설정을 생성합니다.
 
 > 참고: GitHub Actions는 output에 secret-like 값이 포함되면 출력을 차단할 수 있습니다.  
+> 예: `##warning## Skip output 'relay_urls_json' since it may contain secret.`  
 > `relay_urls_json` 출력이 차단되더라도 Stage C에서 **server-4 인스턴스를 조회해 relay URL을 자동 생성**합니다.  
 > 따라서 **oneshot deploy 기준으로 relay URL을 input/variable로 제공할 필요가 없습니다**  
 > (단, server-4를 비활성화한 경우는 예외입니다).
