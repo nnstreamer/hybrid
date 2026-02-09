@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 
-ARG CONFIDENTCOMPUTE_REF=main
+ARG CONFIDENTCOMPUTE_REF=v0.0.80
 ARG COMPUTE_BOOT_BUILD_TAGS=
 COPY patches/confidentcompute-nitro.patch /tmp/confidentcompute-nitro.patch
 RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git . \
