@@ -260,6 +260,58 @@ index 808678a..c853c04 100644
  	default:
  		return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
  	}
+diff --git a/computeboot/nitro_attest.go b/computeboot/nitro_attest.go
+new file mode 100644
+index 0000000..eff1734
+--- /dev/null
++++ b/computeboot/nitro_attest.go
+@@ -0,0 +1,46 @@
++package computeboot
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/hf/nsm"
++	"github.com/hf/nsm/request"
++	ev "github.com/openpcc/openpcc/attestation/evidence"
++)
++
++func isNitroEnclave() bool {
++	_, err := os.Stat("/dev/nsm")
++	return err == nil
++}
++
++func createNitroAttestationEvidence(nonce []byte) (*ev.SignedEvidencePiece, error) {
++	if len(nonce) == 0 {
++		return nil, fmt.Errorf("nitro attestation nonce missing")
++	}
++
++	session, err := nsm.OpenDefaultSession()
++	if err != nil {
++		return nil, fmt.Errorf("open nsm session: %w", err)
++	}
++	defer session.Close()
++
++	resp, err := session.Send(&request.Attestation{
++		Nonce: nonce,
++	})
++	if err != nil {
++		return nil, fmt.Errorf("nsm attestation failed: %w", err)
++	}
++	if resp.Error != "" {
++		return nil, fmt.Errorf("nsm attestation error: %s", resp.Error)
++	}
++	if resp.Attestation == nil || len(resp.Attestation.Document) == 0 {
++		return nil, fmt.Errorf("nsm attestation document missing")
++	}
++
++	return &ev.SignedEvidencePiece{
++		Type:      ev.SevSnpExtendedReport,
++		Data:      resp.Attestation.Document,
++		Signature: []byte{},
++	}, nil
++}
 diff --git a/go.mod b/go.mod
 index f85ffb6..9f0b7f9 100644
 --- a/go.mod
