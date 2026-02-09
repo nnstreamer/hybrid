@@ -848,12 +848,14 @@ jobs:
           set -euo pipefail
           rek_tag=""
           for i in $(seq 1 120); do
+            echo "Waiting for openpcc:rek_hash tag on ${SERVER2_INSTANCE_ID} (attempt ${i}/120)..."
             rek_tag=$(aws ec2 describe-tags \
               --region "${AWS_REGION}" \
               --filters "Name=resource-id,Values=${SERVER2_INSTANCE_ID}" "Name=key,Values=openpcc:rek_hash" \
               --query "Tags[0].Value" \
               --output text)
             if [ -n "${rek_tag}" ] && [ "${rek_tag}" != "None" ]; then
+              echo "Found openpcc:rek_hash tag: ${rek_tag}"
               break
             fi
             sleep 10
@@ -872,6 +874,7 @@ jobs:
           set -euo pipefail
           digest=""
           for i in $(seq 1 12); do
+            echo "Waiting for compute image digest for tag ${IMAGE_TAG} (attempt ${i}/12)..."
             digest=$(aws ecr-public describe-images \
               --region us-east-1 \
               --repository-name openpcc-compute \
@@ -879,6 +882,7 @@ jobs:
               --query "imageDetails[0].imageDigest" \
               --output text || true)
             if [ -n "${digest}" ] && [ "${digest}" != "None" ]; then
+              echo "Resolved compute image digest: ${digest}"
               break
             fi
             sleep 10
