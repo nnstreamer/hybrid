@@ -847,6 +847,7 @@ jobs:
         run: |
           set -euo pipefail
           rek_tag=""
+          echo "This process waits for server-3 bootstrap, which usually takes about 10 minutes."
           for i in $(seq 1 120); do
             echo "Waiting for openpcc:rek_hash tag on ${SERVER2_INSTANCE_ID} (attempt ${i}/120)..."
             rek_tag=$(aws ec2 describe-tags \
