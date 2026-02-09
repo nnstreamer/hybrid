@@ -376,35 +376,35 @@ systemctl start openpcc-enclave.service
 if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1; then
   export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=${TPM_SIMULATOR_CMD_PORT}"
   rek_hash=""
-  for i in $(seq 1 30); do
+  for i in \$(seq 1 30); do
     if tpm2_readpublic -c 0x81000002 -o /tmp/rek.pub >/dev/null 2>&1; then
-      rek_hash=$(sha256sum /tmp/rek.pub | awk '{print $1}')
+      rek_hash=\$(sha256sum /tmp/rek.pub | awk '{print $1}')
       break
     fi
     sleep 10
   done
-  if [ -n "${rek_hash}" ]; then
-    TOKEN="$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
-    if [ -n "${TOKEN}" ]; then
-      INSTANCE_ID="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/instance-id || true)"
-      REGION="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/placement/region || true)"
+  if [ -n "\${rek_hash}" ]; then
+    TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+    if [ -n "\${TOKEN}" ]; then
+      INSTANCE_ID="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/placement/region || true)"
     else
-      INSTANCE_ID="$(curl -s http://169.254.169.254/latest/meta-data/instance-id || true)"
-      REGION="$(curl -s http://169.254.169.254/latest/meta-data/placement/region || true)"
+      INSTANCE_ID="\$(curl -s http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="\$(curl -s http://169.254.169.254/latest/meta-data/placement/region || true)"
     fi
-    if [ -z "${REGION}" ]; then
-      if [ -n "${TOKEN}" ]; then
-        AZ="$(curl -s -H "X-aws-ec2-metadata-token: ${TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+    if [ -z "\${REGION}" ]; then
+      if [ -n "\${TOKEN}" ]; then
+        AZ="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
       else
-        AZ="$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+        AZ="\$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
       fi
-      REGION="${AZ::-1}"
+      REGION="\${AZ::-1}"
     fi
-    if [ -n "${INSTANCE_ID}" ] && [ -n "${REGION}" ]; then
+    if [ -n "\${INSTANCE_ID}" ] && [ -n "\${REGION}" ]; then
       aws ec2 create-tags \
-        --region "${REGION}" \
-        --resources "${INSTANCE_ID}" \
-        --tags "Key=openpcc:rek_hash,Value=sha256:${rek_hash}" || true
+        --region "\${REGION}" \
+        --resources "\${INSTANCE_ID}" \
+        --tags "Key=openpcc:rek_hash,Value=sha256:\${rek_hash}" || true
     else
       echo "Failed to resolve instance metadata for tagging." >&2
     fi
