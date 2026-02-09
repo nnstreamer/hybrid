@@ -378,7 +378,7 @@ if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1;
   rek_hash=""
   for i in \$(seq 1 30); do
     if tpm2_readpublic -c 0x81000002 -o /tmp/rek.pub >/dev/null 2>&1; then
-      rek_hash=\$(sha256sum /tmp/rek.pub | awk '{print $1}')
+      rek_hash=\$(sha256sum /tmp/rek.pub | awk '{print \$1}')
       break
     fi
     sleep 10
