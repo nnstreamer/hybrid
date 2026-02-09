@@ -173,7 +173,13 @@ aws iam list-instance-profiles-for-role --role-name <ROLE_NAME>
 
 GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니다.  
 이 워크플로는 **build/pack/deploy를 한 번에** 수행하며,  
-`server-1 → server-4 → server-3 → server-2` 순서로 **순차 배포**를 진행합니다.
+Stage A(server-1 + server-4) → Stage B(server-2) → Stage C(server-3) 순서로 진행합니다.  
+Stage C는 server-2의 **REK tag/이미지 digest**를 확인한 뒤 server-3 설정을 생성합니다.
+
+> 참고: GitHub Actions는 output에 secret-like 값이 포함되면 출력을 차단할 수 있습니다.  
+> `relay_urls_json` 출력이 차단되더라도 Stage C에서 **server-4 인스턴스를 조회해 relay URL을 자동 생성**합니다.  
+> 따라서 **oneshot deploy 기준으로 relay URL을 input/variable로 제공할 필요가 없습니다**  
+> (단, server-4를 비활성화한 경우는 예외입니다).
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
@@ -200,7 +206,9 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `enable_compute_monitor` (server-2 모니터 설치)
 - `compute_instance_type`, `edge_instance_type`
 - `enclave_cpu_count`, `enclave_memory_mib`, `enclave_cid`
-- `OPENPCC_RELAY_URLS_JSON` (enable_server3_ohttp_advertise=true 이면서 server-4를 배포하지 않을 때 필요)
+- `OPENPCC_RELAY_URLS_JSON`  
+  - **enable_server4=false** 이고 **enable_server3_ohttp_advertise=true** 인 경우에만 필요
+  - 기본 oneshot deploy에서는 server-4를 배포하므로 입력을 기대하지 않습니다.
 
 > `enable_real_attestation_for_client=true`와 `enable_fake_attestation_for_server2=true`는 동시에 사용할 수 없습니다.
 >
@@ -212,6 +220,9 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 `one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
 `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 **JSON을 조회해 주입할 때만** 사용됩니다
 (gateway 자체는 `OHTTP_SEEDS_JSON`만 읽습니다).
+
+> relay URL은 Stage C에서 server-4 인스턴스를 조회해 자동 생성됩니다.  
+> 따라서 **relay URL을 input/variable로 제공할 필요가 없습니다**(server-4 비활성화 시 제외).
 
 **필수(One-shot deploy에서 enable_server3_ohttp_advertise=true): OHTTP_SEEDS_JSON 직접 입력**
 - GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)

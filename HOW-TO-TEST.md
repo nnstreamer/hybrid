@@ -2,15 +2,18 @@
 
 이 문서는 **oHTTP 포함** 경로로 `server-1/2/3/4` 전체를 통과하는
 간단한 테스트를 수행하는 방법을 설명합니다.
-테스트 클라이언트는 `/client/cli/fake-attestation`을 사용합니다.
+oneshot deploy 기본값은 **real attestation**이므로,
+기본 테스트 클라이언트는 `/client/cli/real-attestation`입니다.
+`/client/cli/fake-attestation`은 **fake attestation 빌드**에서만 사용하세요.
 
 ---
 
 ## 1) 사전 조건 (공통)
 
 - 테스트 대상 서버가 실행 중이어야 합니다.
-  - fake_attestation은 **fake attestation** 경로이므로
-    `enable_fake_attestation_for_server2=true` 환경을 전제로 합니다.
+  - oneshot deploy 기본값은 **real attestation**입니다.
+  - `fake-attestation` CLI를 사용할 경우
+    `enable_fake_attestation_for_server2=true`로 배포해야 합니다.
 - 테스트를 실행하는 머신에서 필요한 포트에 접근 가능해야 합니다.
   - oHTTP 포함 시: `server-4(3100/tcp)`, `server-3(8080/tcp)`(시나리오 A에서만)
   - oHTTP 미사용 시: `server-1(3600/tcp)`
@@ -24,7 +27,7 @@
 시나리오 A는 아래 경로를 통과합니다.
 
 ```
-fake_attestation client
+real_attestation client (oneshot 기본) / fake_attestation client (fake attestation 빌드 시)
   -> server-4 (relay)
   -> server-1 (gateway)
   -> server-1 (router)
@@ -33,6 +36,9 @@ fake_attestation client
 
 또한 `server-3`는 `/api/config` 응답으로
 oHTTP 키/릴레이 설정이 정상인지 확인합니다.
+
+> oneshot 기본 테스트는 **11) real-attestation CLI**를 참고하세요.
+> fake-attestation 경로는 **fake attestation 빌드**에서만 사용 가능합니다.
 
 ---
 
@@ -82,6 +88,9 @@ SERVER3_URL="http://<server3-public-ip>:8080"
 RELAY_URL="http://<server4-public-ip>:3100"
 ```
 
+> real-attestation CLI는 `SERVER3_URL`만 주면 relay URL을 자동 추출합니다.  
+> `fake-attestation` CLI는 `RELAY_URL`이 필요합니다.
+
 ### 4-3. OHTTP_SEEDS_JSON
 
 배포에 사용한 JSON을 그대로 사용합니다.
@@ -128,6 +137,9 @@ curl -s "${SERVER3_URL}/api/config" | jq .
 ---
 
 ## 6) fake_attestation 실행 (시나리오 A: oHTTP 포함)
+
+> 이 시나리오는 **fake attestation 빌드**를 전제로 합니다.
+> oneshot 기본값은 real attestation이므로, 기본 테스트는 11) 섹션을 사용하세요.
 
 ### 6-1. 환경 변수 설정
 
