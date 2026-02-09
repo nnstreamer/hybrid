@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -116,6 +118,10 @@ func toGatewayKeys(seeds []seedSpec) ([]gateway.Key, error) {
 		if err != nil {
 			return nil, fmt.Errorf("seed[%d].key_id invalid: %w", idx, err)
 		}
+		derivedSeed, err := deriveSeedHex(seed.SeedHex, seed.KeyID)
+		if err != nil {
+			return nil, fmt.Errorf("seed[%d].seed_hex invalid: %w", idx, err)
+		}
 		activeFrom, err := time.Parse(time.RFC3339, seed.ActiveFrom)
 		if err != nil {
 			return nil, fmt.Errorf("seed[%d].active_from invalid: %w", idx, err)
@@ -127,7 +133,7 @@ func toGatewayKeys(seeds []seedSpec) ([]gateway.Key, error) {
 
 		keys = append(keys, gateway.Key{
 			ID:          keyID,
-			Seed:        seed.SeedHex,
+			Seed:        derivedSeed,
 			ActiveFrom:  activeFrom,
 			ActiveUntil: activeUntil,
 		})
@@ -159,6 +165,37 @@ func hasHexAlpha(value string) bool {
 		}
 	}
 	return false
+}
+
+func deriveSeedHex(seedHex, keyID string) (string, error) {
+	seedBytes, err := hex.DecodeString(seedHex)
+	if err != nil {
+		return "", err
+	}
+	keyIDBytes, err := parseKeyIDBytes(keyID)
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256(append(seedBytes, keyIDBytes...))
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func parseKeyIDBytes(keyID string) ([]byte, error) {
+	if keyID == "" {
+		return nil, fmt.Errorf("empty key_id")
+	}
+	if looksLikeHex(keyID) {
+		return hex.DecodeString(keyID)
+	}
+	return []byte(keyID), nil
+}
+
+func looksLikeHex(value string) bool {
+	if len(value)%2 != 0 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func defaultGatewayKey() (gateway.Key, error) {

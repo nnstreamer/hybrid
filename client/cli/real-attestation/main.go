@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,8 +42,6 @@ const (
 	envAltRelayURL       = "OPENPCC_RELAY_URL"
 	envServer3URL        = "SERVER3_URL"
 	envAltServer3URL     = "OPENPCC_SERVER3_URL"
-	envOHTTPSeedsJSON    = "OHTTP_SEEDS_JSON"
-	envAltOHTTPSeedsJSON = "OPENPCC_OHTTP_SEEDS_JSON"
 	envModelName         = "MODEL_NAME"
 	envPromptText        = "PROMPT_TEXT"
 
@@ -58,7 +56,6 @@ const (
 	relayURLConfigKey    = "relay_url"
 	server3URLConfigKey  = "server3_url"
 	authURLConfigKey     = "auth_url"
-	ohttpSeedsJSONKey    = "ohttp_seeds_json"
 	oidcIssuerConfigKey  = "oidc_issuer"
 	oidcIssuerRegexKey   = "oidc_issuer_regex"
 	oidcSubjectConfigKey = "oidc_subject"
@@ -152,16 +149,26 @@ func makeBadge(model string) (credentialing.Badge, error) {
 	return credentialing.Badge{Credentials: creds, Signature: sig}, nil
 }
 
-type ohttpSeedSpec struct {
-	KeyID       string `json:"key_id"`
-	SeedHex     string `json:"seed_hex"`
-	ActiveFrom  string `json:"active_from"`
-	ActiveUntil string `json:"active_until"`
+const (
+	server3KeyBundleFormat = "openpcc.ohttp.keybundle.v0.002"
+	publicKeyFormatSHA256  = "sha256-seed"
+)
+
+type server3OHTTPKeyBundle struct {
+	Format string                 `json:"format"`
+	Keys   []server3OHTTPKeyEntry `json:"keys"`
 }
 
-type ohttpSeedsEnvelope struct {
-	OHTTPKeys  []ohttpSeedSpec `json:"OHTTP_KEYS"`
-	OHTTPSeeds []ohttpSeedSpec `json:"ohttp_seeds"`
+type server3OHTTPKeyEntry struct {
+	KeyID           string `json:"key_id"`
+	PublicKeyB64    string `json:"public_key_b64"`
+	PublicKeyFormat string `json:"public_key_format"`
+}
+
+type server3OHTTPRotationPeriod struct {
+	KeyID       string `json:"key_id"`
+	ActiveFrom  string `json:"active_from"`
+	ActiveUntil string `json:"active_until"`
 }
 
 type server3Config struct {
@@ -172,6 +179,8 @@ type server3Config struct {
 	RelayURLs  []string `json:"relay_urls"`
 	RouterURL  string   `json:"router_url"`
 	GatewayURL string   `json:"gateway_url"`
+	OHTTPKeyConfigsBundle    string                       `json:"ohttp_key_configs_bundle"`
+	OHTTPKeyRotationPeriods  []server3OHTTPRotationPeriod `json:"ohttp_key_rotation_periods"`
 }
 
 func parseOHTTPFlag(args []string) (bool, error) {
@@ -216,75 +225,71 @@ func parseOHTTPValue(raw string) (bool, error) {
 	}
 }
 
-func parseOHTTPSeedsJSON(raw string) ([]ohttpSeedSpec, error) {
-	raw = strings.TrimSpace(raw)
+func parseOHTTPKeyBundle(bundleB64 string) (ohttp.KeyConfigs, error) {
+	raw := strings.TrimSpace(bundleB64)
 	if raw == "" {
-		return nil, fmt.Errorf("OHTTP seeds JSON is empty")
+		return nil, fmt.Errorf("server-3 ohttp_key_configs_bundle is empty")
 	}
-
-	var seeds []ohttpSeedSpec
-	if err := json.Unmarshal([]byte(raw), &seeds); err == nil && len(seeds) > 0 {
-		return seeds, nil
-	}
-
-	var envelope ohttpSeedsEnvelope
-	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
+	bundleBytes, err := decodeBase64(raw, "ohttp_key_configs_bundle")
+	if err != nil {
 		return nil, err
 	}
-	switch {
-	case len(envelope.OHTTPKeys) > 0:
-		return envelope.OHTTPKeys, nil
-	case len(envelope.OHTTPSeeds) > 0:
-		return envelope.OHTTPSeeds, nil
-	default:
-		return nil, fmt.Errorf("no ohttp seeds found in JSON")
-	}
-}
 
-func buildOHTTPKeyMaterial(seeds []ohttpSeedSpec) (ohttp.KeyConfigs, []gateway.KeyRotationPeriodWithID, error) {
-	if len(seeds) == 0 {
-		return nil, nil, fmt.Errorf("no ohttp seeds provided")
+	var bundle server3OHTTPKeyBundle
+	if err := json.Unmarshal(bundleBytes, &bundle); err != nil {
+		return nil, fmt.Errorf("invalid ohttp_key_configs_bundle JSON: %w", err)
 	}
+	if bundle.Format != server3KeyBundleFormat {
+		return nil, fmt.Errorf("unsupported ohttp key bundle format %q", bundle.Format)
+	}
+	if len(bundle.Keys) == 0 {
+		return nil, fmt.Errorf("ohttp key bundle has no keys")
+	}
+
 	kemID, kdfID, aeadID := gateway.Suite.Params()
-	keyConfigs := make(ohttp.KeyConfigs, 0, len(seeds))
-	rotationPeriods := make([]gateway.KeyRotationPeriodWithID, 0, len(seeds))
+	keyConfigs := make(ohttp.KeyConfigs, 0, len(bundle.Keys))
+	seen := map[byte]struct{}{}
 
-	for idx, seed := range seeds {
-		if strings.TrimSpace(seed.KeyID) == "" {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].key_id is required", idx)
+	for idx, entry := range bundle.Keys {
+		if strings.TrimSpace(entry.KeyID) == "" {
+			return nil, fmt.Errorf("ohttp key bundle keys[%d].key_id is required", idx)
 		}
-		if strings.TrimSpace(seed.SeedHex) == "" {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].seed_hex is required", idx)
+		if strings.TrimSpace(entry.PublicKeyB64) == "" {
+			return nil, fmt.Errorf("ohttp key bundle keys[%d].public_key_b64 is required", idx)
 		}
-		if strings.TrimSpace(seed.ActiveFrom) == "" {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_from is required", idx)
+		if strings.TrimSpace(entry.PublicKeyFormat) == "" {
+			return nil, fmt.Errorf("ohttp key bundle keys[%d].public_key_format is required", idx)
 		}
-		if strings.TrimSpace(seed.ActiveUntil) == "" {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_until is required", idx)
-		}
-
-		keyID, err := parseKeyID(seed.KeyID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].key_id invalid: %w", idx, err)
-		}
-		seedBytes, err := hex.DecodeString(strings.TrimSpace(seed.SeedHex))
-		if err != nil {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].seed_hex invalid: %w", idx, err)
-		}
-		activeFrom, err := time.Parse(time.RFC3339, seed.ActiveFrom)
-		if err != nil {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_from invalid: %w", idx, err)
-		}
-		activeUntil, err := time.Parse(time.RFC3339, seed.ActiveUntil)
-		if err != nil {
-			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_until invalid: %w", idx, err)
+		if entry.PublicKeyFormat != publicKeyFormatSHA256 {
+			return nil, fmt.Errorf("unsupported public_key_format %q", entry.PublicKeyFormat)
 		}
 
-		pubKey, _ := kemID.Scheme().DeriveKeyPair(seedBytes)
+		keyID, err := parseKeyID(entry.KeyID)
+		if err != nil {
+			return nil, fmt.Errorf("ohttp key bundle keys[%d].key_id invalid: %w", idx, err)
+		}
+		if _, ok := seen[keyID]; ok {
+			return nil, fmt.Errorf("ohttp key bundle keys[%d].key_id is duplicated: %s", idx, entry.KeyID)
+		}
+		seen[keyID] = struct{}{}
+
+		seedBytes, err := decodeBase64(strings.TrimSpace(entry.PublicKeyB64), "ohttp_key_configs_bundle.keys[].public_key_b64")
+		if err != nil {
+			return nil, err
+		}
+		if len(seedBytes) != kemID.Scheme().SeedSize() {
+			return nil, fmt.Errorf(
+				"ohttp key bundle keys[%d].public_key_b64 seed length must be %d bytes, got %d",
+				idx,
+				kemID.Scheme().SeedSize(),
+				len(seedBytes),
+			)
+		}
+		publicKey, _ := kemID.Scheme().DeriveKeyPair(seedBytes)
 		keyConfigs = append(keyConfigs, ohttp.KeyConfig{
 			KeyID:     keyID,
 			KemID:     kemID,
-			PublicKey: pubKey,
+			PublicKey: publicKey,
 			SymmetricAlgorithms: []ohttp.SymmetricAlgorithm{
 				{
 					KDFID:  kdfID,
@@ -292,7 +297,48 @@ func buildOHTTPKeyMaterial(seeds []ohttpSeedSpec) (ohttp.KeyConfigs, []gateway.K
 				},
 			},
 		})
-		rotationPeriods = append(rotationPeriods, gateway.KeyRotationPeriodWithID{
+	}
+
+	return keyConfigs, nil
+}
+
+func parseOHTTPRotationPeriods(periods []server3OHTTPRotationPeriod) ([]gateway.KeyRotationPeriodWithID, error) {
+	if len(periods) == 0 {
+		return nil, fmt.Errorf("ohttp_key_rotation_periods is empty")
+	}
+	rotation := make([]gateway.KeyRotationPeriodWithID, 0, len(periods))
+	seen := map[byte]struct{}{}
+
+	for idx, period := range periods {
+		if strings.TrimSpace(period.KeyID) == "" {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].key_id is required", idx)
+		}
+		if strings.TrimSpace(period.ActiveFrom) == "" {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].active_from is required", idx)
+		}
+		if strings.TrimSpace(period.ActiveUntil) == "" {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].active_until is required", idx)
+		}
+
+		keyID, err := parseKeyID(period.KeyID)
+		if err != nil {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].key_id invalid: %w", idx, err)
+		}
+		if _, ok := seen[keyID]; ok {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].key_id is duplicated: %s", idx, period.KeyID)
+		}
+		seen[keyID] = struct{}{}
+
+		activeFrom, err := time.Parse(time.RFC3339, period.ActiveFrom)
+		if err != nil {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].active_from invalid: %w", idx, err)
+		}
+		activeUntil, err := time.Parse(time.RFC3339, period.ActiveUntil)
+		if err != nil {
+			return nil, fmt.Errorf("ohttp_key_rotation_periods[%d].active_until invalid: %w", idx, err)
+		}
+
+		rotation = append(rotation, gateway.KeyRotationPeriodWithID{
 			Period: keyrotation.Period{
 				ActiveFrom:  activeFrom,
 				ActiveUntil: activeUntil,
@@ -301,7 +347,35 @@ func buildOHTTPKeyMaterial(seeds []ohttpSeedSpec) (ohttp.KeyConfigs, []gateway.K
 		})
 	}
 
-	return keyConfigs, rotationPeriods, nil
+	return rotation, nil
+}
+
+func validateOHTTPRotationKeys(keyConfigs ohttp.KeyConfigs, rotation []gateway.KeyRotationPeriodWithID) error {
+	if len(keyConfigs) == 0 {
+		return fmt.Errorf("ohttp key bundle has no keys")
+	}
+	keyIDs := map[byte]struct{}{}
+	for _, key := range keyConfigs {
+		keyIDs[key.KeyID] = struct{}{}
+	}
+	for _, period := range rotation {
+		if _, ok := keyIDs[period.KeyID]; !ok {
+			return fmt.Errorf("ohttp rotation key_id %d missing from key bundle", period.KeyID)
+		}
+	}
+	return nil
+}
+
+func decodeBase64(value, field string) ([]byte, error) {
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err == nil {
+		return decoded, nil
+	}
+	decoded, rawErr := base64.RawStdEncoding.DecodeString(value)
+	if rawErr == nil {
+		return decoded, nil
+	}
+	return nil, fmt.Errorf("%s must be base64: %w", field, err)
 }
 
 func parseKeyID(raw string) (byte, error) {
@@ -416,25 +490,6 @@ func resolveServer3URL(config map[string]string) (string, string) {
 		}
 	}
 	return "", ""
-}
-
-func resolveOHTTPSeedsJSON(config map[string]string) (string, string, error) {
-	if value := strings.TrimSpace(os.Getenv(envAltOHTTPSeedsJSON)); value != "" {
-		return value, "env", nil
-	}
-	if value := strings.TrimSpace(os.Getenv(envOHTTPSeedsJSON)); value != "" {
-		return value, "env", nil
-	}
-	if value := strings.TrimSpace(config[ohttpSeedsJSONKey]); value != "" {
-		return value, "config", nil
-	}
-	return "", "", fmt.Errorf(
-		"missing OHTTP seeds JSON (set %s/%s or %s in %s)",
-		envOHTTPSeedsJSON,
-		envAltOHTTPSeedsJSON,
-		ohttpSeedsJSONKey,
-		configPath,
-	)
 }
 
 func fetchServer3Config(ctx context.Context, client *http.Client, server3URL string) (server3Config, error) {
@@ -633,33 +688,37 @@ func main() {
 	var routerSource string
 	var relayURL string
 	var relaySource string
-	var seedsJSON string
-	var seedsSource string
 	var server3URL string
 	var server3Source string
 	var server3Payload *server3Config
 
 	if ohttpEnabled {
 		server3URL, server3Source = resolveServer3URL(config)
-		if server3URL != "" {
-			fmt.Fprintf(os.Stderr, "Fetching server-3 config (%s): %s/api/config\n", server3Source, strings.TrimRight(server3URL, "/"))
-			payload, fetchErr := fetchServer3Config(context.Background(), nonAnonClient, server3URL)
-			if fetchErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to fetch server-3 config: %v\n", fetchErr)
-			} else {
-				server3Payload = &payload
-				fmt.Fprintf(os.Stderr, "server-3 features: ohttp=%t real_attestation=%t\n", payload.Features.OHTTP, payload.Features.RealAttestation)
-				if len(payload.RelayURLs) > 0 {
-					fmt.Fprintf(os.Stderr, "server-3 relay_urls: %s\n", strings.Join(payload.RelayURLs, ", "))
-				} else {
-					fmt.Fprintln(os.Stderr, "server-3 relay_urls: <empty>")
-				}
-				if strings.TrimSpace(payload.RouterURL) != "" {
-					routerURL = normalizeURL(payload.RouterURL)
-					routerSource = "server-3"
-					fmt.Fprintf(os.Stderr, "server-3 router_url: %s\n", routerURL)
-				}
-			}
+		if server3URL == "" {
+			fmt.Fprintln(os.Stderr, "OHTTP enabled: server-3 URL is required (set SERVER3_URL or OPENPCC_SERVER3_URL)")
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "Fetching server-3 config (%s): %s/api/config\n", server3Source, strings.TrimRight(server3URL, "/"))
+		payload, fetchErr := fetchServer3Config(context.Background(), nonAnonClient, server3URL)
+		if fetchErr != nil {
+			fmt.Fprintf(os.Stderr, "Failed to fetch server-3 config: %v\n", fetchErr)
+			os.Exit(1)
+		}
+		server3Payload = &payload
+		fmt.Fprintf(os.Stderr, "server-3 features: ohttp=%t real_attestation=%t\n", payload.Features.OHTTP, payload.Features.RealAttestation)
+		if !payload.Features.OHTTP {
+			fmt.Fprintln(os.Stderr, "server-3 config reports ohttp disabled; cannot proceed with -ohttp=enable")
+			os.Exit(1)
+		}
+		if len(payload.RelayURLs) > 0 {
+			fmt.Fprintf(os.Stderr, "server-3 relay_urls: %s\n", strings.Join(payload.RelayURLs, ", "))
+		} else {
+			fmt.Fprintln(os.Stderr, "server-3 relay_urls: <empty>")
+		}
+		if strings.TrimSpace(payload.RouterURL) != "" {
+			routerURL = normalizeURL(payload.RouterURL)
+			routerSource = "server-3"
+			fmt.Fprintf(os.Stderr, "server-3 router_url: %s\n", routerURL)
 		}
 
 		relayURL, relaySource, err = resolveRelayURL(config)
@@ -672,11 +731,6 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		seedsJSON, seedsSource, err = resolveOHTTPSeedsJSON(config)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to resolve OHTTP seeds JSON: %v\n", err)
-			os.Exit(1)
-		}
 		if routerURL == "" {
 			routerURL, routerSource = resolveRouterURL(config)
 			if routerURL == "" {
@@ -686,7 +740,6 @@ func main() {
 		}
 		fmt.Fprintf(os.Stderr, "OHTTP enabled: using relay URL (%s): %s\n", relaySource, relayURL)
 		fmt.Fprintf(os.Stderr, "OHTTP enabled: using router URL (%s): %s\n", routerSource, routerURL)
-		fmt.Fprintf(os.Stderr, "OHTTP enabled: using seeds JSON (%s)\n", seedsSource)
 	} else {
 		routerURL, routerSource = resolveRouterURL(config)
 		fmt.Fprintf(os.Stderr, "OHTTP disabled: using router URL (%s): %s\n", routerSource, routerURL)
@@ -734,16 +787,26 @@ func main() {
 	remoteConfig := authclient.RemoteConfig{}
 	var anonClient *http.Client
 	if ohttpEnabled {
-		seeds, err := parseOHTTPSeedsJSON(seedsJSON)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to parse OHTTP seeds JSON: %v\n", err)
+		if server3Payload == nil {
+			fmt.Fprintln(os.Stderr, "OHTTP enabled: server-3 config is required but missing")
 			os.Exit(1)
 		}
-		keyConfigs, rotationPeriods, err := buildOHTTPKeyMaterial(seeds)
+		keyConfigs, err := parseOHTTPKeyBundle(server3Payload.OHTTPKeyConfigsBundle)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to build OHTTP key configs: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Failed to parse server-3 ohttp key bundle: %v\n", err)
 			os.Exit(1)
 		}
+		rotationPeriods, err := parseOHTTPRotationPeriods(server3Payload.OHTTPKeyRotationPeriods)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to parse server-3 ohttp rotation periods: %v\n", err)
+			os.Exit(1)
+		}
+		if err := validateOHTTPRotationKeys(keyConfigs, rotationPeriods); err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid server-3 ohttp config: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "server-3 ohttp key bundle: %d keys, %d rotation entries\n", len(keyConfigs), len(rotationPeriods))
+
 		anonClient, err = buildOHTTPClient(nonAnonClient, relayURL, keyConfigs, rotationPeriods)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to build OHTTP client: %v\n", err)

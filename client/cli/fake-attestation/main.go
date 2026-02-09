@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -242,6 +243,19 @@ func buildOHTTPKeyMaterial(seeds []ohttpSeedSpec) (ohttp.KeyConfigs, []gateway.K
 		if err != nil {
 			return nil, nil, fmt.Errorf("ohttp_seeds[%d].seed_hex invalid: %w", idx, err)
 		}
+		keyIDBytes, err := parseKeyIDBytes(seed.KeyID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ohttp_seeds[%d].key_id invalid: %w", idx, err)
+		}
+		derivedSeed := sha256.Sum256(append(seedBytes, keyIDBytes...))
+		if len(derivedSeed) != kemID.Scheme().SeedSize() {
+			return nil, nil, fmt.Errorf(
+				"ohttp_seeds[%d].seed_hex derived seed length must be %d bytes, got %d",
+				idx,
+				kemID.Scheme().SeedSize(),
+				len(derivedSeed),
+			)
+		}
 		activeFrom, err := time.Parse(time.RFC3339, seed.ActiveFrom)
 		if err != nil {
 			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_from invalid: %w", idx, err)
@@ -251,7 +265,7 @@ func buildOHTTPKeyMaterial(seeds []ohttpSeedSpec) (ohttp.KeyConfigs, []gateway.K
 			return nil, nil, fmt.Errorf("ohttp_seeds[%d].active_until invalid: %w", idx, err)
 		}
 
-		pubKey, _ := kemID.Scheme().DeriveKeyPair(seedBytes)
+		pubKey, _ := kemID.Scheme().DeriveKeyPair(derivedSeed[:])
 		keyConfigs = append(keyConfigs, ohttp.KeyConfig{
 			KeyID:     keyID,
 			KemID:     kemID,
@@ -299,6 +313,24 @@ func hasHexAlpha(value string) bool {
 		}
 	}
 	return false
+}
+
+func parseKeyIDBytes(keyID string) ([]byte, error) {
+	if keyID == "" {
+		return nil, fmt.Errorf("empty key_id")
+	}
+	if looksLikeHex(keyID) {
+		return hex.DecodeString(keyID)
+	}
+	return []byte(keyID), nil
+}
+
+func looksLikeHex(value string) bool {
+	if len(value)%2 != 0 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func resolveRouterURL() (string, string, error) {

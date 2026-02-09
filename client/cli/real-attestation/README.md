@@ -36,9 +36,11 @@ This CLI requires the `-ohttp` flag:
 - `-ohttp=enable` (relay + gateway)
 
 When `-ohttp=enable`, you must also set:
-- `OHTTP_SEEDS_JSON` (or `OPENPCC_OHTTP_SEEDS_JSON`)
+- `SERVER3_URL` (or `OPENPCC_SERVER3_URL`)
 
 The relay URL can be set directly **or** fetched from server-3 `/api/config`.
+The oHTTP **public key bundle** is always fetched from server-3, so `OHTTP_SEEDS_JSON`
+is **not required** for this CLI.
 `ROUTER_URL` is not required in this mode.
 
 ### Option A) Relay URL 직접 지정
@@ -63,9 +65,9 @@ server3_url=http://<server3-public-ip>:8080
 
 이 경우 실행 시 **server-3에서 relay_urls를 가져오는 로그가 출력**됩니다.
 
-### OHTTP seeds (필수)
+### OHTTP 공개키 번들 (server-3에서 자동 획득)
 ```bash
-export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-02-01T00:00:00Z","active_until":"2026-12-31T23:59:59Z"}]'
+export SERVER3_URL="http://<server3-public-ip>:8080"
 ```
 
 ## Verification warning (기본 동작)
@@ -125,6 +127,6 @@ go run . -ohttp=disable
 Example (oHTTP enabled):
 ```bash
 export RELAY_URL="http://<relay-ip>:3100"
-export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-01-30T00:00:00Z","active_until":"2026-07-30T00:00:00Z"}]'
+export SERVER3_URL="http://<server3-public-ip>:8080"
 go run . -ohttp=enable
 ```

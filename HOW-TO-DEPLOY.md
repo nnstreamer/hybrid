@@ -222,6 +222,12 @@ Stage C는 server-2의 **REK tag/이미지 digest**를 확인한 뒤 server-3 �
 `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 **JSON을 조회해 주입할 때만** 사용됩니다
 (gateway 자체는 `OHTTP_SEEDS_JSON`만 읽습니다).
 
+> 참고: `OHTTP_SEEDS_JSON`은 **server-1/gateway 및 server-3용** 입력입니다.  
+> real-attestation CLI는 server-3의 **oHTTP 공개키 번들**을 사용하므로
+> client 측에서는 seed를 요구하지 않습니다.
+> server-1/gateway는 `seed_hex`와 `key_id`를 결합해
+> `SHA256(seed || key_id)`로 **실제 KEM seed를 파생**합니다.
+
 > relay URL은 Stage C에서 server-4 인스턴스를 조회해 자동 생성됩니다.  
 > 따라서 **relay URL을 input/variable로 제공할 필요가 없습니다**(server-4 비활성화 시 제외).
 

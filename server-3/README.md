@@ -53,8 +53,9 @@ See `config/server-3.sample.json` for a concrete example.
 ```
 
 `public_key_b64` is derived deterministically from `seed_hex` and `key_id` by
-`SHA256(seed || key_id)`. Rotation periods are emitted separately in
-`ohttp_key_rotation_periods`.
+`SHA256(seed || key_id)`. Clients **treat this value as the deterministic seed**
+for deriving the HPKE public key (using the same gateway suite).
+Rotation periods are emitted separately in `ohttp_key_rotation_periods`.
 
 ## Build and run
 
