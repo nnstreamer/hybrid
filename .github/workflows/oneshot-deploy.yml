@@ -763,6 +763,7 @@ jobs:
       RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ inputs.enable_server3_ohttp_advertise }}
       RESOLVED_ENABLE_REAL_ATTESTATION_FOR_CLIENT: ${{ inputs.enable_real_attestation_for_client }}
       RESOLVED_ENABLE_FAKE_ATTESTATION_FOR_SERVER2: ${{ inputs.enable_fake_attestation_for_server2 }}
+      RESOLVED_ENABLE_SERVER4: ${{ inputs.enable_server4 }}
       RESOLVED_OHTTP_SEEDS_SECRET_REF: ${{ vars.OPENPCC_OHTTP_SEEDS_SECRET_REF != '' && vars.OPENPCC_OHTTP_SEEDS_SECRET_REF || '' }}
       RESOLVED_OHTTP_SEEDS_JSON: ${{ secrets.OPENPCC_OHTTP_SEEDS_JSON != '' && secrets.OPENPCC_OHTTP_SEEDS_JSON || vars.OPENPCC_OHTTP_SEEDS_JSON || '' }}
       RESOLVED_ATTESTATION_POLICY_ID: ${{ vars.OPENPCC_ATTESTATION_POLICY_ID != '' && vars.OPENPCC_ATTESTATION_POLICY_ID || '' }}
@@ -932,6 +933,57 @@ jobs:
             echo "RESOLVED_ATTESTATION_VERIFIER_HINTS_JSON=${hints_json}" >> "${GITHUB_ENV}"
           fi
 
+      - name: Resolve relay URLs (Stage C fallback)
+        if: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE == 'true' && env.RESOLVED_RELAY_URLS_JSON == '' }}
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          ENABLE_SERVER4: ${{ env.RESOLVED_ENABLE_SERVER4 }}
+        run: |
+          set -euo pipefail
+          if [[ "${ENABLE_SERVER4}" != "true" ]]; then
+            echo "OPENPCC_RELAY_URLS_JSON is empty and server-4 is disabled." >&2
+            exit 1
+          fi
+          relay_instance_id=""
+          for i in $(seq 1 30); do
+            echo "Waiting for server-4 instance to be running (attempt ${i}/30)..."
+            relay_instance_id=$(aws ec2 describe-instances \
+              --region "${AWS_REGION}" \
+              --filters "Name=tag:Name,Values=openpcc-relay" "Name=instance-state-name,Values=running" \
+              --query "Reservations[].Instances[].InstanceId | [0]" \
+              --output text)
+            if [ -n "${relay_instance_id}" ] && [ "${relay_instance_id}" != "None" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "${relay_instance_id}" ] || [ "${relay_instance_id}" = "None" ]; then
+            echo "Failed to find running server-4 instance (tag Name=openpcc-relay)." >&2
+            exit 1
+          fi
+          private_ip=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --instance-ids "${relay_instance_id}" \
+            --query "Reservations[0].Instances[0].PrivateIpAddress" \
+            --output text)
+          public_ip=$(aws ec2 describe-instances \
+            --region "${AWS_REGION}" \
+            --instance-ids "${relay_instance_id}" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+          if [ -z "${private_ip}" ] || [ "${private_ip}" = "None" ]; then
+            echo "Failed to resolve server-4 private IP address." >&2
+            exit 1
+          fi
+          if [ -z "${public_ip}" ] || [ "${public_ip}" = "None" ]; then
+            echo "::warning::server-4 public IP missing; using private IP for relay URL."
+            relay_url="http://${private_ip}:3100"
+          else
+            relay_url="http://${public_ip}:3100"
+          fi
+          echo "Resolved relay URL: ${relay_url}"
+          printf 'RESOLVED_RELAY_URLS_JSON=["%s"]\n' "${relay_url}" >> "${GITHUB_ENV}"
+
       - name: Preflight validate server-3 config inputs
         env:
           ENABLE_SERVER3_OHTTP_ADVERTISE: ${{ env.RESOLVED_ENABLE_SERVER3_OHTTP_ADVERTISE }}
@@ -1016,11 +1068,13 @@ jobs:
               seeds_raw = os.getenv("OHTTP_SEEDS_JSON", "")
               require("OPENPCC_RELAY_URLS_JSON", relay_raw, "stage-a output or repo variable")
               require("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw, "repo variable/secret")
-              relay = parse_json("OPENPCC_RELAY_URLS_JSON", relay_raw, list)
-              ensure_non_empty_list(relay, "OPENPCC_RELAY_URLS_JSON")
-              seeds = parse_json("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw, list)
-              if not seeds:
-                  raise SystemExit("OPENPCC_OHTTP_SEEDS_JSON must be a non-empty list")
+              if relay_raw.strip():
+                  relay = parse_json("OPENPCC_RELAY_URLS_JSON", relay_raw, list)
+                  ensure_non_empty_list(relay, "OPENPCC_RELAY_URLS_JSON")
+              if seeds_raw.strip():
+                  seeds = parse_json("OPENPCC_OHTTP_SEEDS_JSON", seeds_raw, list)
+                  if not seeds:
+                      raise SystemExit("OPENPCC_OHTTP_SEEDS_JSON must be a non-empty list")
 
           if enable_real:
               policy_id = os.getenv("ATTESTATION_POLICY_ID", "")
