@@ -22,6 +22,18 @@ COPY patches/confidentcompute-nitro.patch /tmp/confidentcompute-nitro.patch
 RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git . \
   && git apply /tmp/confidentcompute-nitro.patch
 
+RUN set -eu; \
+  echo "== debug: git status =="; \
+  git --no-pager status --short; \
+  echo "== debug: git diff --stat =="; \
+  git --no-pager diff --stat; \
+  echo "== debug: go.mod (hf/nsm) =="; \
+  awk '/hf\\/nsm/ {print NR ":" $0}' go.mod || true; \
+  echo "== debug: go.sum (nsm/cbor/float16/lint/tools) =="; \
+  awk '/hf\\/nsm|fxamacker\\/cbor\\/v2|x448\\/float16|golang\\.org\\/x\\/lint|golang\\.org\\/x\\/tools/ {print NR ":" $0}' go.sum || true; \
+  echo "== debug: go.sum total lines =="; \
+  wc -l go.sum
+
 RUN go mod download
 
 RUN if [ -n "${COMPUTE_BOOT_BUILD_TAGS}" ]; then \
