@@ -326,7 +326,7 @@ index f85ffb6..9f0b7f9 100644
  	github.com/ollama/ollama v0.13.0
 @@ -33,9 +34,11 @@ require (
  )
-
+ 
  require (
 +	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
  	github.com/openpcc/bhttp v0.0.79 // indirect
