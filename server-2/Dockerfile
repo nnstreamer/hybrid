@@ -27,11 +27,15 @@ RUN set -eu; \
   git --no-pager status --short; \
   echo "== debug: git diff --stat =="; \
   git --no-pager diff --stat; \
+  echo "== debug: go env =="; \
+  go env GOFLAGS GOPROXY GONOSUMDB GOPRIVATE GOSUMDB; \
   echo "== debug: go.mod (hf/nsm) =="; \
-  awk '/hf\\/nsm/ {print NR ":" $0}' go.mod || true; \
+  awk '/hf\/nsm/ {print NR ":" $0}' go.mod || true; \
   echo "== debug: go.sum (nsm/cbor/float16/lint/tools) =="; \
-  awk '/hf\\/nsm|fxamacker\\/cbor\\/v2|x448\\/float16|golang\\.org\\/x\\/lint|golang\\.org\\/x\\/tools/ {print NR ":" $0}' go.sum || true; \
+  awk '/hf\/nsm|fxamacker\/cbor\/v2|x448\/float16|golang\.org\/x\/lint|golang\.org\/x\/tools/ {print NR ":" $0}' go.sum || true; \
   echo "== debug: go.sum total lines =="; \
+  go list -m -json github.com/fxamacker/cbor/v2 2>/tmp/go-list-cbor.err || true; \
+  if [ -s /tmp/go-list-cbor.err ]; then echo "== debug: go list -m cbor error =="; cat /tmp/go-list-cbor.err; fi; \
   wc -l go.sum
 
 RUN go mod download
