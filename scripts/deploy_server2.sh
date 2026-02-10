@@ -85,29 +85,24 @@ deploy_compute() {
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
   fi
-  local monitor_app_b64=""
-  local monitor_service_b64=""
-  if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
-    local monitor_app_path
-    local monitor_service_path
-    monitor_app_path="${ROOT_DIR}/server-2/monitor/app.py"
-    monitor_service_path="${ROOT_DIR}/server-2/monitor/openpcc-compute-monitor.service"
-    if [[ ! -f "${monitor_app_path}" || ! -f "${monitor_service_path}" ]]; then
-      echo "Compute monitor assets not found under server-2/monitor." >&2
-      exit 1
-    fi
-    monitor_app_b64=$(base64 -w 0 "${monitor_app_path}")
-    monitor_service_b64=$(base64 -w 0 "${monitor_service_path}")
-  fi
   local user_data
   user_data="$(mktemp)"
   user_data_after_reboot="$(mktemp)"
-  cat >"${user_data_after_reboot}" <<EOF
+cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
-MONITOR_APP_B64="${monitor_app_b64}"
-MONITOR_SERVICE_B64="${monitor_service_b64}"
-COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
+ECM="${ENABLE_COMPUTE_MONITOR}"
+SB="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
+RA="${ROUTER_ADDRESS}"
+RC="${ROUTER_COM_PORT:-8081}"
+PH="${ROUTER_PROXY_HOST}"
+PP="${ROUTER_PROXY_PORT}"
+TC="${TPM_SIMULATOR_CMD_PORT}"
+TP="${TPM_SIMULATOR_PLATFORM_PORT}"
+EC="${ENCLAVE_CID}"
+CPU="${ENCLAVE_CPU_COUNT}"
+MEM="${ENCLAVE_MEMORY_MIB}"
+NR="${NITRO_RUN_ARGS}"
+ES="/opt/openpcc/enclave_scripts"
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -130,177 +125,79 @@ cd ..
 
 docker pull "${compute_image_uri}"
 
-EIF_PATH="/opt/openpcc/compute.eif"
+mkdir -p "\${ES}"
+cid=\$(docker create "${compute_image_uri}")
+docker cp "\${cid}:/enclave_scripts/." "\${ES}"
+docker rm "\${cid}"
+
+EF="/opt/openpcc/compute.eif"
 mkdir -p "/opt/openpcc"
-R_ADDRESS="${ROUTER_ADDRESS}"
-R_COM_PORT="${ROUTER_COM_PORT:-8081}"
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
-  COMPUTE_HOST="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+  CH="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 else
-  COMPUTE_HOST="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+  CH="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 fi
-if [[ -z "\${COMPUTE_HOST}" ]]; then
-  COMPUTE_HOST="\$(hostname -I | awk '{print \$1}' || true)"
+if [[ -z "\${CH}" ]]; then
+  CH="\$(hostname -I | awk '{print \$1}' || true)"
 fi
-if [[ -z "\${COMPUTE_HOST}" ]]; then
+if [[ -z "\${CH}" ]]; then
   echo "Failed to determine compute host IP." >&2
   exit 1
 fi
-R_PROXY_HOST="${ROUTER_PROXY_HOST}"
-R_PROXY_PORT="${ROUTER_PROXY_PORT}"
-R_PROXY_URL="http://\${R_PROXY_HOST}:\${R_PROXY_PORT}"
-TPM_SIM_CMD_PORT="${TPM_SIMULATOR_CMD_PORT}"
-TPM_SIM_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT}"
-ENCLAVE_CID="${ENCLAVE_CID}"
-if [[ "\${TPM_SIM_PLATFORM_PORT}" -ne "\$((TPM_SIM_CMD_PORT + 1))" ]]; then
-  TPM_SIM_PLATFORM_PORT="\$((TPM_SIM_CMD_PORT + 1))"
+PU="http://\${PH}:\${PP}"
+if [[ "\${TP}" -ne "\$((TC + 1))" ]]; then
+  TP="\$((TC + 1))"
 fi
-router_host="\${R_ADDRESS#http://}"
-router_host="\${router_host#https://}"
-router_host="\${router_host%%/*}"
-router_port="3600"
-if [[ "\${router_host}" == *:* ]]; then
-  router_port="\${router_host##*:}"
-  router_host="\${router_host%%:*}"
+RH="\${RA#http://}"
+RH="\${RH#https://}"
+RH="\${RH%%/*}"
+RP="3600"
+if [[ "\${RH}" == *:* ]]; then
+  RP="\${RH##*:}"
+  RH="\${RH%%:*}"
 fi
-if [[ -z "\${router_host}" ]]; then
-  echo "Failed to parse router host from \${R_ADDRESS}" >&2
+if [[ -z "\${RH}" ]]; then
+  echo "Failed to parse router host from \${RA}" >&2
   exit 1
 fi
 mkdir -p /etc/nitro_enclaves
-cat > /etc/nitro_enclaves/vsock-proxy.yaml <<PROXY_EOF
-allowlist:
-  - address: "\${router_host}"
-    port: \${router_port}
-  - address: "127.0.0.1"
-    port: \${TPM_SIM_CMD_PORT}
-  - address: "127.0.0.1"
-    port: \${TPM_SIM_PLATFORM_PORT}
-PROXY_EOF
+export RH RP TC TP
+envsubst < "\${ES}/vsock-proxy.yaml.tmpl" > /etc/nitro_enclaves/vsock-proxy.yaml
 
-TPM_SIM_DIR="/opt/openpcc/ms-tpm-20-ref"
-TPM_SIM_BIN="\${TPM_SIM_DIR}/TPMCmd/Simulator/src/tpm2-simulator"
-if [[ ! -x "\${TPM_SIM_BIN}" ]]; then
-  rm -rf "\${TPM_SIM_DIR}"
-  git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git "\${TPM_SIM_DIR}"
+TD="/opt/openpcc/ms-tpm-20-ref"
+TB="\${TD}/TPMCmd/Simulator/src/tpm2-simulator"
+if [[ ! -x "\${TB}" ]]; then
+  rm -rf "\${TD}"
+  git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git "\${TD}"
   (
-    cd "\${TPM_SIM_DIR}/TPMCmd"
+    cd "\${TD}/TPMCmd"
     ./bootstrap
     ./configure
     make -j"\$(nproc)"
   )
 fi
 
-cat > /etc/systemd/system/openpcc-tpm-sim.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC TPM simulator (mssim)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=\${TPM_SIM_BIN} \${TPM_SIM_CMD_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-router.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to router
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${R_PROXY_PORT} \${router_host} \${router_port}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-tpm-cmd.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to TPM simulator (cmd)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_CMD_PORT} 127.0.0.1 \${TPM_SIM_CMD_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-tpm-platform.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to TPM simulator (platform)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_PLATFORM_PORT} 127.0.0.1 \${TPM_SIM_PLATFORM_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-enclave-health-proxy.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC TCP to vsock health proxy
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/socat TCP-LISTEN:\${R_COM_PORT},reuseaddr,fork VSOCK-CONNECT:\${ENCLAVE_CID}:\${R_COM_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-enclave.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC Nitro Enclave
-After=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
-Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
-ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
-ExecStop=/usr/bin/nitro-cli terminate-enclave --all
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
+export TB PP RC EC CPU MEM NR
+envsubst < "\${ES}/systemd/openpcc-tpm-sim.service.tmpl" > /etc/systemd/system/openpcc-tpm-sim.service
+envsubst < "\${ES}/systemd/openpcc-vsock-router.service.tmpl" > /etc/systemd/system/openpcc-vsock-router.service
+envsubst < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-cmd.service
+envsubst < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
+envsubst < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
+envsubst < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
 
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
 systemctl enable openpcc-enclave.service
-if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
+if [[ "\${ECM}" == "true" ]]; then
   MONITOR_DIR="/opt/openpcc/compute-monitor"
   mkdir -p "\${MONITOR_DIR}"
-  printf '%s' "\${MONITOR_APP_B64}" | base64 -d > "\${MONITOR_DIR}/app.py"
+  cp "\${ES}/monitor/app.py" "\${MONITOR_DIR}/app.py"
   chmod 755 "\${MONITOR_DIR}/app.py"
-  printf '%s' "\${MONITOR_SERVICE_B64}" | base64 -d > /etc/systemd/system/openpcc-compute-monitor.service
+  cp "\${ES}/monitor/openpcc-compute-monitor.service" /etc/systemd/system/openpcc-compute-monitor.service
   systemctl daemon-reload
   systemctl enable --now openpcc-compute-monitor.service
 fi
@@ -310,7 +207,7 @@ mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 CONFIG_DIR="\$(mktemp -d)"
 cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
 http:
-  port: "\${R_COM_PORT}"
+  port: "\${RC}"
 evidence:
   socket: "\${EVIDENCE_SOCKET:-/tmp/router.sock}"
   timeout: \${EVIDENCE_TIMEOUT:-30s}
@@ -322,8 +219,8 @@ router_com:
     device: "\${TPM_DEVICE:-/dev/tpmrm0}"
     simulate: \${SIMULATE_TPM:-true}
     rek_handle: \${REK_HANDLE:-0x81000002}
-    simulator_cmd_address: "\${SIM_CMD_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_CMD_PORT}}"
-    simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
+    simulator_cmd_address: "\${SIM_CMD_ADDRESS:-127.0.0.1:\${TC}}"
+    simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:\${TP}}"
   worker:
     binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
     llm_base_url: "\${LLM_BASE_URL:-http://127.0.0.1:11434}"
@@ -333,9 +230,9 @@ router_agent:
     - llm
     - "engine=\${INFERENCE_ENGINE_TYPE:-ollama}"
     - "model=\${MODEL_1:-llama3.2:1b}"
-  node_target_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/"
-  node_healthcheck_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/_health"
-  router_base_url: "\${R_PROXY_URL}"
+  node_target_url: "http://\${CH}:\${RC}/"
+  node_healthcheck_url: "http://\${CH}:\${RC}/_health"
+  router_base_url: "\${PU}"
 CONFIG_EOF
 
 cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
@@ -354,15 +251,15 @@ tpm:
   rek_creation_hash_handle: \${TPM_REK_HASH_HANDLE:-0x01c0000B}
   attestation_key_handle: \${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
   tpm_type: \${TPM_TYPE:-Simulator}
-  simulator_cmd_address: "127.0.0.1:${TPM_SIMULATOR_CMD_PORT}"
-  simulator_platform_address: "127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}"
+  simulator_cmd_address: "127.0.0.1:\${TC}"
+  simulator_platform_address: "127.0.0.1:\${TP}"
 attestation:
   fake_secret: "\${FAKE_ATTESTATION_SECRET:-123456}"
 gpu:
   required: \${GPU_REQUIRED:-false}
   attestation_mode: \${GPU_ATTESTATION_MODE:-none}
 transparency:
-  image_sigstore_bundle: "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
+  image_sigstore_bundle: "\${SB:-}"
 CONFIG_EOF
 
 cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
@@ -377,7 +274,7 @@ rm -rf "\${CONFIG_DIR}"
 systemctl start openpcc-enclave.service
 
 if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1; then
-  export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=${TPM_SIMULATOR_CMD_PORT}"
+  export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=\${TC}"
   rek_hash=""
   REK_TAG_MAX_RETRIES=120
   REK_TAG_SLEEP_SECONDS=10
@@ -431,7 +328,7 @@ script_after_reboot_b64=$(gzip -c "${user_data_after_reboot}" | base64 -w 0)
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip awscli tpm2-tools
+apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip awscli tpm2-tools gettext-base
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" <<'INEOF'
 ${script_after_reboot_b64}

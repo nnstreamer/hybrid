@@ -115,6 +115,7 @@ COPY --from=build /out/compute_worker /opt/confidentcompute/bin/compute_worker
 COPY config/compute_boot.yaml /etc/openpcc/compute_boot.yaml
 COPY config/router_com.yaml /etc/openpcc/router_com.yaml
 COPY entrypoint.sh /opt/confidentcompute/bin/entrypoint.sh
+COPY enclave_scripts /enclave_scripts
 
 RUN chmod +x /opt/confidentcompute/bin/entrypoint.sh
 

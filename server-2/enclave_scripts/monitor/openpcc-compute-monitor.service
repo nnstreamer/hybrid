@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenPCC compute monitor (debug only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/openpcc/compute-monitor/app.py --log-path /var/log/cloud-init-output.log --port 10080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
