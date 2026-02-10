@@ -37,7 +37,6 @@ TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
 COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
-COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM:-}"
 
 require_env() {
   local name="$1"
@@ -81,10 +80,7 @@ deploy_compute() {
     echo "Provide ROUTER_ADDRESS when deploying compute without router." >&2
     exit 1
   fi
-  if [[ -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" && -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM}" ]]; then
-    echo "Missing COMPUTE_IMAGE_SIGSTORE_BUNDLE or COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM." >&2
-    exit 1
-  fi
+  require_env COMPUTE_IMAGE_SIGSTORE_BUNDLE
   if [[ -z "${COMPUTE_AMI_ID}" ]]; then
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
@@ -108,12 +104,10 @@ deploy_compute() {
   user_data_after_reboot="$(mktemp)"
   cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-AWS_REGION="${AWS_REGION}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
 MONITOR_APP_B64="${monitor_app_b64}"
 MONITOR_SERVICE_B64="${monitor_service_b64}"
 COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
-COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM}"
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -127,19 +121,6 @@ make nitro-cli
 make vsock-proxy
 make NITRO_CLI_INSTALL_DIR=/ install
 source /etc/profile.d/nitro-cli-env.sh
-if [[ -z "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" && -n "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM}" ]]; then
-  if command -v aws >/dev/null 2>&1; then
-    COMPUTE_IMAGE_SIGSTORE_BUNDLE=\$(aws ssm get-parameter \
-      --region "\${AWS_REGION}" \
-      --name "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM}" \
-      --query Parameter.Value \
-      --output text || true)
-  fi
-fi
-if [[ -z "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" ]]; then
-  echo "Missing COMPUTE_IMAGE_SIGSTORE_BUNDLE; cannot build attestation evidence." >&2
-  exit 1
-fi
 echo source /etc/profile.d/nitro-cli-env.sh >> ~/.bashrc
 nitro-cli-config -i
 systemctl enable --now nitro-enclaves-allocator

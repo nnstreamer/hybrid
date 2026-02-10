@@ -296,22 +296,16 @@ aws secretsmanager create-secret \
 ### 6-2b. Sigstore bundle 자동 주입 (compute 이미지)
 
 real-attestation 경로에서 `compute_boot`는 **이미지 Sigstore bundle**을 요구합니다.
-one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성하고,
-**SSM Parameter Store에 저장한 뒤** server-2가 부팅 시 조회하도록 구성합니다.
+one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성해
+`COMPUTE_IMAGE_SIGSTORE_BUNDLE`로 자동 주입합니다.
 
 필요 조건:
 - GitHub Actions OIDC (`id-token: write`)
 - Sigstore(Fulcio/Rekor) 접근 가능
-- GitHub Actions 역할: `ssm:PutParameter`
-- server-2 인스턴스 프로파일: `ssm:GetParameter`
 
-수동 실행 시에는 다음 중 하나를 사용합니다:
+수동 실행 시에는 다음과 같이 전달할 수 있습니다:
 ```bash
-# 1) 직접 주입 (user_data 크기 제한에 걸릴 수 있음)
 export COMPUTE_IMAGE_SIGSTORE_BUNDLE="$(base64 -w 0 compute.bundle)"
-
-# 2) SSM 파라미터 참조 (권장)
-export COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM="/openpcc/compute-image-sigstore/<IMAGE_TAG>"
 ```
 
 ### 6-3. 개발용 TPM 시뮬레이터/프록시 구성
