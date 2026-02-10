@@ -768,6 +768,20 @@ jobs:
           bundle_b64="$(base64 -w 0 /tmp/compute.sigstore.bundle)"
           echo "COMPUTE_IMAGE_SIGSTORE_BUNDLE=${bundle_b64}" >> "${GITHUB_ENV}"
 
+      - name: Store compute sigstore bundle in SSM
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          param_name="/openpcc/compute-image-sigstore/${IMAGE_TAG}"
+          aws ssm put-parameter \
+            --region "${AWS_REGION}" \
+            --name "${param_name}" \
+            --type String \
+            --value "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" \
+            --overwrite >/dev/null
+          echo "COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM=${param_name}" >> "${GITHUB_ENV}"
+
       - name: Deploy server-2
         env:
           COMPONENT: server-2
@@ -787,7 +801,7 @@ jobs:
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
           TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
           TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
-          COMPUTE_IMAGE_SIGSTORE_BUNDLE: ${{ env.COMPUTE_IMAGE_SIGSTORE_BUNDLE }}
+          COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM: ${{ env.COMPUTE_IMAGE_SIGSTORE_BUNDLE_SSM_PARAM }}
         run: bash scripts/deploy_server2.sh
 
   stage-c:
