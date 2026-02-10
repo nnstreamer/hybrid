@@ -157,9 +157,9 @@ if [[ -z "\${SB}" && -n "\${BR}" ]]; then
     echo "Bundle missing: \${BF}" >&2
     exit 1
   fi
-  echo "Bundle bytes: \$(stat -c %s \"\${BF}\")"
+  echo "Bundle bytes: \$(stat -c %s "\${BF}")"
   sha256sum "\${BF}"
-  SB="\$(base64 -w 0 \"\${BF}\")"
+  SB="\$(base64 -w 0 "\${BF}")"
 fi
 if [[ -z "\${SB}" ]]; then
   echo "Missing sigstore bundle; cannot continue." >&2
