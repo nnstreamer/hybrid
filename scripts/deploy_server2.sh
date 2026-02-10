@@ -36,6 +36,7 @@ TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
+COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
 
 require_env() {
   local name="$1"
@@ -79,6 +80,7 @@ deploy_compute() {
     echo "Provide ROUTER_ADDRESS when deploying compute without router." >&2
     exit 1
   fi
+  require_env COMPUTE_IMAGE_SIGSTORE_BUNDLE
   if [[ -z "${COMPUTE_AMI_ID}" ]]; then
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
@@ -97,6 +99,10 @@ deploy_compute() {
     monitor_app_b64=$(base64 -w 0 "${monitor_app_path}")
     monitor_service_b64=$(base64 -w 0 "${monitor_service_path}")
   fi
+  local sigstore_bundle_b64=""
+  if [[ -n "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" ]]; then
+    sigstore_bundle_b64="$(printf '%s' "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" | base64 -w 0)"
+  fi
   local user_data
   user_data="$(mktemp)"
   user_data_after_reboot="$(mktemp)"
@@ -105,6 +111,7 @@ deploy_compute() {
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
 MONITOR_APP_B64="${monitor_app_b64}"
 MONITOR_SERVICE_B64="${monitor_service_b64}"
+COMPUTE_IMAGE_SIGSTORE_BUNDLE_B64="${sigstore_bundle_b64}"
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -118,6 +125,11 @@ make nitro-cli
 make vsock-proxy
 make NITRO_CLI_INSTALL_DIR=/ install
 source /etc/profile.d/nitro-cli-env.sh
+
+COMPUTE_IMAGE_SIGSTORE_BUNDLE=""
+if [[ -n "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE_B64}" ]]; then
+  COMPUTE_IMAGE_SIGSTORE_BUNDLE=\$(printf '%s' "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE_B64}" | base64 -d)
+fi
 echo source /etc/profile.d/nitro-cli-env.sh >> ~/.bashrc
 nitro-cli-config -i
 systemctl enable --now nitro-enclaves-allocator
