@@ -164,7 +164,7 @@ if [[ -z "\${RH}" ]]; then
 fi
 mkdir -p /etc/nitro_enclaves
 export RH RP TC TP
-envsubst < "\${ES}/vsock-proxy.yaml.tmpl" > /etc/nitro_enclaves/vsock-proxy.yaml
+envsubst '\${RH} \${RP} \${TC} \${TP}' < "\${ES}/vsock-proxy.yaml.tmpl" > /etc/nitro_enclaves/vsock-proxy.yaml
 
 TD="/opt/openpcc/ms-tpm-20-ref"
 TB="\${TD}/TPMCmd/Simulator/src/tpm2-simulator"
@@ -179,13 +179,13 @@ if [[ ! -x "\${TB}" ]]; then
   )
 fi
 
-export TB PP RC EC CPU MEM NR
-envsubst < "\${ES}/systemd/openpcc-tpm-sim.service.tmpl" > /etc/systemd/system/openpcc-tpm-sim.service
-envsubst < "\${ES}/systemd/openpcc-vsock-router.service.tmpl" > /etc/systemd/system/openpcc-vsock-router.service
-envsubst < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-cmd.service
-envsubst < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
-envsubst < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
-envsubst < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
+export TB TC TP PP RH RP RC EC CPU MEM NR
+envsubst '\${TB} \${TC}' < "\${ES}/systemd/openpcc-tpm-sim.service.tmpl" > /etc/systemd/system/openpcc-tpm-sim.service
+envsubst '\${PP} \${RH} \${RP}' < "\${ES}/systemd/openpcc-vsock-router.service.tmpl" > /etc/systemd/system/openpcc-vsock-router.service
+envsubst '\${TC}' < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-cmd.service
+envsubst '\${TP}' < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
+envsubst '\${RC} \${EC}' < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
+envsubst '\${CPU} \${MEM} \${EC} \${NR}' < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
 
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
@@ -205,62 +205,9 @@ export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
 CONFIG_DIR="\$(mktemp -d)"
-cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
-http:
-  port: "\${RC}"
-evidence:
-  socket: "\${EVIDENCE_SOCKET:-/tmp/router.sock}"
-  timeout: \${EVIDENCE_TIMEOUT:-30s}
-models:
-  - "\${MODEL_1:-llama3.2:1b}"
-router_com:
-  check_compute_boot_exit: \${CHECK_COMPUTE_BOOT_EXIT:-false}
-  tpm:
-    device: "\${TPM_DEVICE:-/dev/tpmrm0}"
-    simulate: \${SIMULATE_TPM:-true}
-    rek_handle: \${REK_HANDLE:-0x81000002}
-    simulator_cmd_address: "\${SIM_CMD_ADDRESS:-127.0.0.1:\${TC}}"
-    simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:\${TP}}"
-  worker:
-    binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
-    llm_base_url: "\${LLM_BASE_URL:-http://127.0.0.1:11434}"
-    badge_public_key: "\${BADGE_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQTFKNXJhQTdEZTQ0elFSRVpxU21BbkRMK1RObjFPUUROZW1sWmc4eWc3azg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
-router_agent:
-  tags:
-    - llm
-    - "engine=\${INFERENCE_ENGINE_TYPE:-ollama}"
-    - "model=\${MODEL_1:-llama3.2:1b}"
-  node_target_url: "http://\${CH}:\${RC}/"
-  node_healthcheck_url: "http://\${CH}:\${RC}/_health"
-  router_base_url: "\${PU}"
-CONFIG_EOF
-
-cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
-inference_engine:
-  type: \${INFERENCE_ENGINE_TYPE:-ollama}
-  skip: \${INFERENCE_ENGINE_SKIP:-false}
-  models:
-    - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
-  local_dev: \${INFERENCE_ENGINE_LOCAL_DEV:-true}
-  url: "\${INFERENCE_ENGINE_URL:-http://127.0.0.1:11434}"
-  systemd_service_name: "\${INFERENCE_ENGINE_SERVICE:-ollama.service}"
-tpm:
-  primary_key_handle: \${TPM_PRIMARY_KEY_HANDLE:-0x81000001}
-  child_key_handle: \${TPM_CHILD_KEY_HANDLE:-0x81000002}
-  rek_creation_ticket_handle: \${TPM_REK_TICKET_HANDLE:-0x01c0000A}
-  rek_creation_hash_handle: \${TPM_REK_HASH_HANDLE:-0x01c0000B}
-  attestation_key_handle: \${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
-  tpm_type: \${TPM_TYPE:-Simulator}
-  simulator_cmd_address: "127.0.0.1:\${TC}"
-  simulator_platform_address: "127.0.0.1:\${TP}"
-attestation:
-  fake_secret: "\${FAKE_ATTESTATION_SECRET:-123456}"
-gpu:
-  required: \${GPU_REQUIRED:-false}
-  attestation_mode: \${GPU_ATTESTATION_MODE:-none}
-transparency:
-  image_sigstore_bundle: "\${SB:-}"
-CONFIG_EOF
+export RC TC TP CH PU SB
+envsubst '\${RC} \${TC} \${TP} \${CH} \${PU}' < "\${ES}/config/router_com.yaml.tmpl" > "\${CONFIG_DIR}/router_com.yaml"
+envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${CONFIG_DIR}/compute_boot.yaml"
 
 cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
 FROM ${compute_image_uri}
