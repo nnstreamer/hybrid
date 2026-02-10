@@ -94,6 +94,9 @@ deploy_compute() {
   user_data_after_reboot="$(mktemp)"
 cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
+export HOME="/root"
+mkdir -p "${HOME}"
+echo "HOME=${HOME}"
 ECM="${ENABLE_COMPUTE_MONITOR}"
 SB="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
 BR="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF}"
