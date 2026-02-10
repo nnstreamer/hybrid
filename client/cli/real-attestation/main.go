@@ -33,6 +33,7 @@ import (
 const (
 	configPath       = "/etc/nnstreamer/hybrid.ini"
 	defaultRouterURL = "http://localhost:3600"
+	ohttpRouterURL   = "http://" + gateway.ExternalRouterHost
 	defaultModel     = "llama3.2:1b"
 	defaultPrompt    = "Hello from OpenPCC."
 
@@ -731,15 +732,8 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		if routerURL == "" {
-			routerURL, routerSource = resolveRouterURL(config)
-			if routerURL == "" {
-				fmt.Fprintln(os.Stderr, "Failed to resolve router URL for oHTTP mode")
-				os.Exit(1)
-			}
-		}
 		fmt.Fprintf(os.Stderr, "OHTTP enabled: using relay URL (%s): %s\n", relaySource, relayURL)
-		fmt.Fprintf(os.Stderr, "OHTTP enabled: using router URL (%s): %s\n", routerSource, routerURL)
+		fmt.Fprintf(os.Stderr, "OHTTP enabled: using router host for encapsulation: %s\n", ohttpRouterURL)
 	} else {
 		routerURL, routerSource = resolveRouterURL(config)
 		fmt.Fprintf(os.Stderr, "OHTTP disabled: using router URL (%s): %s\n", routerSource, routerURL)
@@ -784,6 +778,11 @@ func main() {
 		openpcc.WithNonAnonHTTPClient(nonAnonClient),
 	}
 
+	routerTargetURL := routerURL
+	if ohttpEnabled {
+		routerTargetURL = ohttpRouterURL
+	}
+
 	remoteConfig := authclient.RemoteConfig{}
 	var anonClient *http.Client
 	if ohttpEnabled {
@@ -816,12 +815,12 @@ func main() {
 			OHTTPRelayURLs:          []string{relayURL},
 			OHTTPKeyConfigs:         keyConfigs,
 			OHTTPKeyRotationPeriods: rotationPeriods,
-			RouterURL:               routerURL,
+			RouterURL:               routerTargetURL,
 		}
-		options = append(options, openpcc.WithRouterURL(routerURL), openpcc.WithAnonHTTPClient(anonClient))
+		options = append(options, openpcc.WithRouterURL(routerTargetURL), openpcc.WithAnonHTTPClient(anonClient))
 	} else {
 		anonClient = newProxyHTTPClient()
-		options = append(options, openpcc.WithRouterURL(routerURL), openpcc.WithAnonHTTPClient(anonClient))
+		options = append(options, openpcc.WithRouterURL(routerTargetURL), openpcc.WithAnonHTTPClient(anonClient))
 	}
 
 	fakeAuth := fakeAuthClient{
@@ -838,7 +837,7 @@ func main() {
 		transparency.NewCachedVerifier(verifier),
 		*cfg.TransparencyIdentityPolicy,
 	)
-	nodeFinder := newLenientNodeFinder(anonClient, fakeAuth, nodeVerifier, routerURL)
+	nodeFinder := newLenientNodeFinder(anonClient, fakeAuth, nodeVerifier, routerTargetURL)
 
 	options = append(options,
 		openpcc.WithAuthClient(fakeAuth),
