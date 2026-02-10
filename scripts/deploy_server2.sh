@@ -238,6 +238,14 @@ export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
 CONFIG_DIR="\$(mktemp -d)"
+EL="\${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
+ED="\${CONFIG_DIR}/binary_bios_measurements"
+if [[ -s "\${EL}" ]]; then
+  cp "\${EL}" "\${ED}"
+else
+  echo "Missing event log: \${EL}" >&2
+  exit 1
+fi
 export RC TC TP CH PU SB
 envsubst '\${RC} \${TC} \${TP} \${CH} \${PU}' < "\${ES}/config/router_com.yaml.tmpl" > "\${CONFIG_DIR}/router_com.yaml"
 envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${CONFIG_DIR}/compute_boot.yaml"
@@ -245,6 +253,7 @@ envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${C
 cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
 FROM ${compute_image_uri}
 COPY router_com.yaml /etc/openpcc/router_com.yaml
+COPY binary_bios_measurements /etc/openpcc/binary_bios_measurements
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
 docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"

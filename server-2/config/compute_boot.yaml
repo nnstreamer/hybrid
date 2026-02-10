@@ -18,6 +18,7 @@ tpm:
   rek_creation_hash_handle: ${TPM_REK_HASH_HANDLE:-0x01c0000B}
   attestation_key_handle: ${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
   tpm_type: ${TPM_TYPE:-Simulator}
+  event_log_path: ${TPM_EVENT_LOG_PATH:-/etc/openpcc/binary_bios_measurements}
   simulator_cmd_address: ${SIMULATOR_CMD_ADDRESS:-}
   simulator_platform_address: ${SIMULATOR_PLATFORM_ADDRESS:-}
 attestation:
