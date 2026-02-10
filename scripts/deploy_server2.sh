@@ -248,7 +248,7 @@ COPY router_com.yaml /etc/openpcc/router_com.yaml
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
 DOCKER_EOF
 docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
-nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
+nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EF}"
 rm -rf "\${CONFIG_DIR}"
 
 systemctl start openpcc-enclave.service
