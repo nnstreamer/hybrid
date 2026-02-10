@@ -776,12 +776,15 @@ jobs:
           image_ref="${IMAGE_REGISTRY}/${COMPUTE_IMAGE_NAME}@${COMPUTE_IMAGE_DIGEST}"
           cosign sign --yes --bundle /tmp/compute.sigstore.bundle "${image_ref}"
           bundle_ref="${IMAGE_REGISTRY}/${COMPUTE_IMAGE_NAME}:bundle-${IMAGE_TAG}"
+          echo "Working dir: $(pwd)"
           echo "Pushing bundle artifact: ${bundle_ref}"
-          ls -l /tmp/compute.sigstore.bundle
-          sha256sum /tmp/compute.sigstore.bundle
+          bundle_file="compute.sigstore.bundle"
+          cp /tmp/compute.sigstore.bundle "${bundle_file}"
+          ls -l "${bundle_file}"
+          sha256sum "${bundle_file}"
           oras push "${bundle_ref}" \
             --artifact-type application/vnd.dev.sigstore.bundle.v0.3+json \
-            /tmp/compute.sigstore.bundle:application/json
+            "${bundle_file}:application/json"
           echo "COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF=${bundle_ref}" >> "${GITHUB_ENV}"
 
       - name: Deploy server-2
