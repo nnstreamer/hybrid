@@ -296,16 +296,21 @@ aws secretsmanager create-secret \
 ### 6-2b. Sigstore bundle 자동 주입 (compute 이미지)
 
 real-attestation 경로에서 `compute_boot`는 **이미지 Sigstore bundle**을 요구합니다.
-one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성해
-`COMPUTE_IMAGE_SIGSTORE_BUNDLE`로 자동 주입합니다.
+one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성하고,
+**ECR Public Repo에 OCI artifact(tag)로 업로드**합니다. server-2는 부팅 시
+`oras pull`로 bundle을 내려받아 사용합니다.
 
 필요 조건:
 - GitHub Actions OIDC (`id-token: write`)
 - Sigstore(Fulcio/Rekor) 접근 가능
 
-수동 실행 시에는 다음과 같이 전달할 수 있습니다:
+수동 실행 시에는 다음 중 하나를 사용합니다:
 ```bash
+# 1) 직접 주입 (user_data 크기 제한에 걸릴 수 있음)
 export COMPUTE_IMAGE_SIGSTORE_BUNDLE="$(base64 -w 0 compute.bundle)"
+
+# 2) ECR Public OCI artifact 참조 (권장)
+export COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF="public.ecr.aws/<alias>/openpcc-compute:bundle-<IMAGE_TAG>"
 ```
 
 ### 6-3. 개발용 TPM 시뮬레이터/프록시 구성

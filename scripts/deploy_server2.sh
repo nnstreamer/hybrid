@@ -37,6 +37,7 @@ TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
 COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
+COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF:-}"
 
 require_env() {
   local name="$1"
@@ -80,7 +81,10 @@ deploy_compute() {
     echo "Provide ROUTER_ADDRESS when deploying compute without router." >&2
     exit 1
   fi
-  require_env COMPUTE_IMAGE_SIGSTORE_BUNDLE
+  if [[ -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" && -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF}" ]]; then
+    echo "Missing COMPUTE_IMAGE_SIGSTORE_BUNDLE or COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF." >&2
+    exit 1
+  fi
   if [[ -z "${COMPUTE_AMI_ID}" ]]; then
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
@@ -92,6 +96,7 @@ cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
 ECM="${ENABLE_COMPUTE_MONITOR}"
 SB="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
+BR="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF}"
 RA="${ROUTER_ADDRESS}"
 RC="${ROUTER_COM_PORT:-8081}"
 PH="${ROUTER_PROXY_HOST}"
@@ -103,6 +108,7 @@ CPU="${ENCLAVE_CPU_COUNT}"
 MEM="${ENCLAVE_MEMORY_MIB}"
 NR="${NITRO_RUN_ARGS}"
 ES="/opt/openpcc/enclave_scripts"
+OV="1.3.0"
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -132,6 +138,30 @@ docker rm "\${cid}"
 
 EF="/opt/openpcc/compute.eif"
 mkdir -p "/opt/openpcc"
+if [[ -z "\${SB}" && -n "\${BR}" ]]; then
+  echo "Fetching sigstore bundle: \${BR}"
+  OT="/tmp/oras.tgz"
+  curl -fsSL "https://github.com/oras-project/oras/releases/download/v\${OV}/oras_\${OV}_linux_amd64.tar.gz" -o "\${OT}"
+  tar -xzf "\${OT}" -C /usr/local/bin oras
+  chmod +x /usr/local/bin/oras
+  rm -f "\${OT}"
+  oras version
+  BD="/opt/openpcc/bundle"
+  BF="\${BD}/compute.sigstore.bundle"
+  mkdir -p "\${BD}"
+  (cd "\${BD}" && oras pull "\${BR}")
+  if [[ ! -s "\${BF}" ]]; then
+    echo "Bundle missing: \${BF}" >&2
+    exit 1
+  fi
+  echo "Bundle bytes: \$(stat -c %s \"\${BF}\")"
+  sha256sum "\${BF}"
+  SB="\$(base64 -w 0 \"\${BF}\")"
+fi
+if [[ -z "\${SB}" ]]; then
+  echo "Missing sigstore bundle; cannot continue." >&2
+  exit 1
+fi
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
