@@ -293,6 +293,21 @@ aws secretsmanager create-secret \
 > 주의: `deploy_server1.sh`는 일부 저장소(AWS Secrets Manager/SSM)만 조회합니다.  
 > `server-1` gateway 자체는 **OHTTP_SEEDS_JSON만** 읽습니다.
 
+### 6-2b. Sigstore bundle 자동 주입 (compute 이미지)
+
+real-attestation 경로에서 `compute_boot`는 **이미지 Sigstore bundle**을 요구합니다.
+one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성해
+`COMPUTE_IMAGE_SIGSTORE_BUNDLE`로 자동 주입합니다.
+
+필요 조건:
+- GitHub Actions OIDC (`id-token: write`)
+- Sigstore(Fulcio/Rekor) 접근 가능
+
+수동 실행 시에는 다음과 같이 전달할 수 있습니다:
+```bash
+export COMPUTE_IMAGE_SIGSTORE_BUNDLE="$(base64 -w 0 compute.bundle)"
+```
+
 ### 6-3. 개발용 TPM 시뮬레이터/프록시 구성
 
 - 개발/로컬 테스트는 **TPM Simulator(mssim)** 를 사용합니다.

@@ -723,6 +723,49 @@ jobs:
           COMPUTE_BOOT_BUILD_TAGS: ${{ env.RESOLVED_COMPUTE_BOOT_BUILD_TAGS }}
         run: bash scripts/build_pack.sh
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Resolve compute image digest
+        env:
+          COMPUTE_IMAGE_NAME: openpcc-compute
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+        run: |
+          set -euo pipefail
+          digest=""
+          for i in $(seq 1 60); do
+            digest="$(aws ecr-public describe-images \
+              --region us-east-1 \
+              --repository-name "${COMPUTE_IMAGE_NAME}" \
+              --image-ids imageTag="${IMAGE_TAG}" \
+              --query 'imageDetails[0].imageDigest' \
+              --output text 2>/tmp/ecr-public.err || true)"
+            if [[ -n "${digest}" && "${digest}" != "None" ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ -z "${digest}" || "${digest}" == "None" ]]; then
+            echo "Failed to resolve compute image digest for ${COMPUTE_IMAGE_NAME}:${IMAGE_TAG}." >&2
+            if [[ -s /tmp/ecr-public.err ]]; then
+              echo "ECR error output:" >&2
+              cat /tmp/ecr-public.err >&2
+            fi
+            exit 1
+          fi
+          echo "COMPUTE_IMAGE_DIGEST=${digest}" >> "${GITHUB_ENV}"
+
+      - name: Generate compute image sigstore bundle
+        env:
+          COMPUTE_IMAGE_NAME: openpcc-compute
+          IMAGE_REGISTRY: ${{ env.IMAGE_REGISTRY }}
+        run: |
+          set -euo pipefail
+          image_ref="${IMAGE_REGISTRY}/${COMPUTE_IMAGE_NAME}@${COMPUTE_IMAGE_DIGEST}"
+          cosign sign --yes --bundle /tmp/compute.sigstore.bundle "${image_ref}"
+          bundle_b64="$(base64 -w 0 /tmp/compute.sigstore.bundle)"
+          echo "COMPUTE_IMAGE_SIGSTORE_BUNDLE=${bundle_b64}" >> "${GITHUB_ENV}"
+
       - name: Deploy server-2
         env:
           COMPONENT: server-2
@@ -742,6 +785,7 @@ jobs:
           ENCLAVE_CID: ${{ env.RESOLVED_ENCLAVE_CID }}
           TPM_SIMULATOR_CMD_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_CMD_PORT }}
           TPM_SIMULATOR_PLATFORM_PORT: ${{ env.RESOLVED_TPM_SIMULATOR_PLATFORM_PORT }}
+          COMPUTE_IMAGE_SIGSTORE_BUNDLE: ${{ env.COMPUTE_IMAGE_SIGSTORE_BUNDLE }}
         run: bash scripts/deploy_server2.sh
 
   stage-c:
