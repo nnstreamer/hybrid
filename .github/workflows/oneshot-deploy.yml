@@ -425,6 +425,8 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          # Temporary test override for server-1 AMI.
+          ROUTER_AMI_ID: "ami-0826c69636e499eaa"
           ROUTER_INSTANCE_TYPE: ${{ env.RESOLVED_EDGE_INSTANCE_TYPE }}
           # NOTE: Used for gateway seed sync when provided.
           OHTTP_SEEDS_SECRET_REF: ${{ env.RESOLVED_OHTTP_SEEDS_SECRET_REF }}
