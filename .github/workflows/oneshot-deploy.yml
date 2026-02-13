@@ -798,6 +798,8 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          # Temporary test override for server-2 AMI.
+          COMPUTE_AMI_ID: "ami-0826c69636e499ea"
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.SERVER1_ROUTER_URL }}

@@ -36,6 +36,7 @@ TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
+TPM_SUPPORT="${TPM_SUPPORT:-v2.0}"
 COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
 COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF:-}"
 
@@ -332,6 +333,10 @@ EOF
 
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
+  local tpm_args=()
+  if [[ -n "${TPM_SUPPORT}" ]]; then
+    tpm_args+=(--tpm-specifications "TpmSupport=${TPM_SUPPORT}")
+  fi
 
   local instance_ids
   instance_ids=$(aws ec2 describe-instances \
@@ -356,7 +361,8 @@ EOF
     --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
     --query 'Instances[0].InstanceId' \
     --output text \
-    "${common_args[@]}")
+    "${common_args[@]}" \
+    "${tpm_args[@]}")
 
   rm -f "${user_data}"
 
