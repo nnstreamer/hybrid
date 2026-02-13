@@ -307,37 +307,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.RESOLVED_AWS_REGION }}
 
-      - name: Ensure AWS CLI supports TPM options
-        run: |
-          set -euo pipefail
-          if python3 - <<'PY'
-          import os
-          import subprocess
-          import sys
-
-          env = dict(os.environ)
-          env["AWS_PAGER"] = ""
-          try:
-              out = subprocess.check_output(
-                  ["aws", "ec2", "run-instances", "help"],
-                  stderr=subprocess.STDOUT,
-                  text=True,
-                  env=env,
-              )
-          except Exception:
-              sys.exit(1)
-          sys.exit(0 if "--tpm-specifications" in out else 1)
-          PY
-          then
-            aws --version
-            exit 0
-          fi
-          echo "AWS CLI lacks --tpm-specifications; updating AWS CLI v2."
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
-          unzip -q /tmp/awscliv2.zip -d /tmp
-          sudo /tmp/aws/install --update
-          aws --version
-
       - name: Resolve image registry
         id: resolve-registry
         env:

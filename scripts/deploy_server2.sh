@@ -75,6 +75,183 @@ make_common_args() {
   printf '%s\n' "${args[@]}"
 }
 
+load_image_info() {
+  local image_id="$1"
+  local image_json
+  image_json="$(mktemp)"
+  aws ec2 describe-images --region "${AWS_REGION}" --image-ids "${image_id}" --output json > "${image_json}"
+  local assignments
+  assignments="$(python3 - "${image_json}" <<'PY'
+import json
+import shlex
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+images = data.get("Images") or []
+if not images:
+    sys.exit(2)
+
+img = images[0]
+
+def q(val: object) -> str:
+    if val is None:
+        return shlex.quote("")
+    return shlex.quote(str(val))
+
+def bool_str(val: object) -> str:
+    return "true" if val else "false"
+
+print(f"tpm_support={q(img.get('TpmSupport'))}")
+print(f"boot_mode={q(img.get('BootMode'))}")
+print(f"root_device_name={q(img.get('RootDeviceName'))}")
+print(f"architecture={q(img.get('Architecture'))}")
+print(f"virtualization_type={q(img.get('VirtualizationType'))}")
+print(f"ena_support={q(bool_str(img.get('EnaSupport')))}")
+print(f"sriov_net_support={q(img.get('SriovNetSupport'))}")
+
+root_name = img.get("RootDeviceName")
+bdm_json = ""
+if root_name:
+    for bdm in img.get("BlockDeviceMappings", []):
+        if bdm.get("DeviceName") != root_name:
+            continue
+        ebs = bdm.get("Ebs") or {}
+        if not ebs.get("SnapshotId"):
+            continue
+        allowed = [
+            "SnapshotId",
+            "VolumeSize",
+            "VolumeType",
+            "DeleteOnTermination",
+            "Iops",
+            "Throughput",
+            "Encrypted",
+            "KmsKeyId",
+        ]
+        ebs_filtered = {key: ebs[key] for key in allowed if key in ebs}
+        bdm_json = json.dumps([{"DeviceName": root_name, "Ebs": ebs_filtered}])
+        break
+
+print(f"root_bdm_json={q(bdm_json)}")
+PY
+)"
+  rm -f "${image_json}"
+  if [[ -z "${assignments}" ]]; then
+    echo "Failed to parse AMI metadata for ${image_id}." >&2
+    exit 1
+  fi
+  eval "${assignments}"
+}
+
+is_nitrotpm_enabled() {
+  local tpm_support="$1"
+  local boot_mode="$2"
+  if [[ "${tpm_support}" != "v2.0" ]]; then
+    return 1
+  fi
+  if [[ "${boot_mode}" != "uefi" && "${boot_mode}" != "uefi-preferred" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+resolve_nitrotpm_ami() {
+  local source_ami="${COMPUTE_AMI_ID}"
+  echo "Checking NitroTPM support for AMI ${source_ami}"
+  load_image_info "${source_ami}"
+  local source_tpm_support="${tpm_support}"
+  local source_boot_mode="${boot_mode}"
+  local source_root_device_name="${root_device_name}"
+  local source_root_bdm_json="${root_bdm_json}"
+  local source_architecture="${architecture}"
+  local source_virtualization_type="${virtualization_type}"
+  local source_ena_support="${ena_support}"
+  local source_sriov_net_support="${sriov_net_support}"
+
+  if is_nitrotpm_enabled "${source_tpm_support}" "${source_boot_mode}"; then
+    echo "Source AMI already NitroTPM-enabled: ${source_ami}"
+    return 0
+  fi
+
+  local cached_ami
+  cached_ami=$(aws ec2 describe-images \
+    --region "${AWS_REGION}" \
+    --owners self \
+    --filters "Name=tag:OpenPccSourceAmi,Values=${source_ami}" \
+              "Name=tag:OpenPccNitroTpm,Values=true" \
+              "Name=state,Values=available" \
+    --query "Images | sort_by(@,&CreationDate)[-1].ImageId" \
+    --output text)
+
+  if [[ -n "${cached_ami}" && "${cached_ami}" != "None" ]]; then
+    load_image_info "${cached_ami}"
+    if is_nitrotpm_enabled "${tpm_support}" "${boot_mode}"; then
+      COMPUTE_AMI_ID="${cached_ami}"
+      echo "Using cached NitroTPM AMI: ${COMPUTE_AMI_ID}"
+      return 0
+    fi
+  fi
+
+  if [[ -z "${TPM_SUPPORT}" ]]; then
+    echo "TPM_SUPPORT is empty; cannot register NitroTPM AMI." >&2
+    exit 1
+  fi
+  if [[ -z "${source_root_device_name}" || -z "${source_root_bdm_json}" ]]; then
+    echo "Failed to determine root snapshot for ${source_ami}; cannot register NitroTPM AMI." >&2
+    exit 1
+  fi
+  if [[ -z "${source_architecture}" || -z "${source_virtualization_type}" ]]; then
+    echo "Missing AMI metadata (architecture/virtualization_type) for ${source_ami}." >&2
+    exit 1
+  fi
+
+  local timestamp
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local ami_name
+  ami_name="openpcc-compute-tpm-${source_ami}-${timestamp}"
+  local register_args=(
+    --region "${AWS_REGION}"
+    --name "${ami_name}"
+    --description "OpenPCC NitroTPM AMI from ${source_ami}"
+    --architecture "${source_architecture}"
+    --virtualization-type "${source_virtualization_type}"
+    --root-device-name "${source_root_device_name}"
+    --block-device-mappings "${source_root_bdm_json}"
+    --boot-mode "uefi"
+    --tpm-support "${TPM_SUPPORT}"
+  )
+  if [[ "${source_ena_support}" == "true" ]]; then
+    register_args+=(--ena-support)
+  fi
+  if [[ -n "${source_sriov_net_support}" && "${source_sriov_net_support}" != "None" ]]; then
+    register_args+=(--sriov-net-support "${source_sriov_net_support}")
+  fi
+
+  echo "Registering NitroTPM AMI for ${source_ami}"
+  local new_ami_id
+  new_ami_id=$(aws ec2 register-image "${register_args[@]}" --query 'ImageId' --output text)
+  if [[ -z "${new_ami_id}" || "${new_ami_id}" == "None" ]]; then
+    echo "Failed to register NitroTPM AMI from ${source_ami}." >&2
+    exit 1
+  fi
+  aws ec2 create-tags \
+    --region "${AWS_REGION}" \
+    --resources "${new_ami_id}" \
+    --tags "Key=Name,Value=${ami_name}" \
+           "Key=OpenPccSourceAmi,Value=${source_ami}" \
+           "Key=OpenPccNitroTpm,Value=true" \
+           "Key=OpenPccBootMode,Value=uefi" \
+           "Key=OpenPccTpmSupport,Value=${TPM_SUPPORT}"
+
+  echo "Waiting for NitroTPM AMI ${new_ami_id} to be available..."
+  aws ec2 wait image-available --region "${AWS_REGION}" --image-ids "${new_ami_id}"
+  COMPUTE_AMI_ID="${new_ami_id}"
+  echo "NitroTPM AMI ready: ${COMPUTE_AMI_ID}"
+}
+
 deploy_compute() {
   require_env COMPUTE_SECURITY_GROUP_ID
   if [[ -z "${ROUTER_ADDRESS}" ]]; then
@@ -90,6 +267,7 @@ deploy_compute() {
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
   fi
+  resolve_nitrotpm_ami
   local user_data
   user_data="$(mktemp)"
   user_data_after_reboot="$(mktemp)"
@@ -333,19 +511,6 @@ EOF
 
 
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
-  local tpm_args=()
-  if [[ -n "${TPM_SUPPORT}" ]]; then
-    local tpm_help
-    tpm_help="$(AWS_PAGER="" aws ec2 run-instances help 2>/dev/null || true)"
-    if [[ "${tpm_help}" == *"--tpm-specifications"* ]]; then
-      tpm_args+=(--tpm-specifications "TpmSupport=${TPM_SUPPORT}")
-    else
-      echo "AWS CLI does not support --tpm-specifications (TPM_SUPPORT=${TPM_SUPPORT})." >&2
-      echo "Update AWS CLI v2 or set TPM_SUPPORT=\"\" to skip TPM support." >&2
-      aws --version 2>/dev/null || true
-      exit 1
-    fi
-  fi
 
   local instance_ids
   instance_ids=$(aws ec2 describe-instances \
@@ -370,8 +535,7 @@ EOF
     --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":50,"VolumeType":"gp3"}}]' \
     --query 'Instances[0].InstanceId' \
     --output text \
-    "${common_args[@]}" \
-    "${tpm_args[@]}")
+    "${common_args[@]}")
 
   rm -f "${user_data}"
 
