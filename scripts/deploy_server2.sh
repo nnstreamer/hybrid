@@ -335,7 +335,16 @@ EOF
   mapfile -t common_args < <(make_common_args "${COMPUTE_SECURITY_GROUP_ID}")
   local tpm_args=()
   if [[ -n "${TPM_SUPPORT}" ]]; then
-    tpm_args+=(--tpm-specifications "TpmSupport=${TPM_SUPPORT}")
+    local tpm_help
+    tpm_help="$(AWS_PAGER="" aws ec2 run-instances help 2>/dev/null || true)"
+    if [[ "${tpm_help}" == *"--tpm-specifications"* ]]; then
+      tpm_args+=(--tpm-specifications "TpmSupport=${TPM_SUPPORT}")
+    else
+      echo "AWS CLI does not support --tpm-specifications (TPM_SUPPORT=${TPM_SUPPORT})." >&2
+      echo "Update AWS CLI v2 or set TPM_SUPPORT=\"\" to skip TPM support." >&2
+      aws --version 2>/dev/null || true
+      exit 1
+    fi
   fi
 
   local instance_ids
