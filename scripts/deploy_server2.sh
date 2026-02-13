@@ -128,8 +128,6 @@ if root_name:
             "DeleteOnTermination",
             "Iops",
             "Throughput",
-            "Encrypted",
-            "KmsKeyId",
         ]
         ebs_filtered = {key: ebs[key] for key in allowed if key in ebs}
         bdm_json = json.dumps([{"DeviceName": root_name, "Ebs": ebs_filtered}])
