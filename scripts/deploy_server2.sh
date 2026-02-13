@@ -114,6 +114,7 @@ print(f"sriov_net_support={q(img.get('SriovNetSupport'))}")
 
 root_name = img.get("RootDeviceName")
 bdm_json = ""
+root_snapshot_id = ""
 if root_name:
     for bdm in img.get("BlockDeviceMappings", []):
         if bdm.get("DeviceName") != root_name:
@@ -130,10 +131,12 @@ if root_name:
             "Throughput",
         ]
         ebs_filtered = {key: ebs[key] for key in allowed if key in ebs}
+        root_snapshot_id = ebs_filtered.get("SnapshotId") or ""
         bdm_json = json.dumps([{"DeviceName": root_name, "Ebs": ebs_filtered}])
         break
 
 print(f"root_bdm_json={q(bdm_json)}")
+print(f"root_snapshot_id={q(root_snapshot_id)}")
 PY
 )"
   rm -f "${image_json}"
@@ -156,6 +159,49 @@ is_nitrotpm_enabled() {
   return 0
 }
 
+ensure_snapshot_owned() {
+  local snapshot_id="$1"
+  local account_id
+  account_id=$(aws sts get-caller-identity --region "${AWS_REGION}" --query Account --output text)
+  local owner_id
+  owner_id=$(aws ec2 describe-snapshots \
+    --region "${AWS_REGION}" \
+    --snapshot-ids "${snapshot_id}" \
+    --query 'Snapshots[0].OwnerId' \
+    --output text 2>/dev/null || true)
+  if [[ -n "${owner_id}" && "${owner_id}" != "None" && "${owner_id}" == "${account_id}" ]]; then
+    echo "${snapshot_id}"
+    return 0
+  fi
+
+  echo "Copying snapshot ${snapshot_id} into account ${account_id}" >&2
+  local copy_description
+  copy_description="OpenPCC copy of ${snapshot_id}"
+  local new_snapshot_id
+  new_snapshot_id=$(aws ec2 copy-snapshot \
+    --region "${AWS_REGION}" \
+    --source-region "${AWS_REGION}" \
+    --source-snapshot-id "${snapshot_id}" \
+    --description "${copy_description}" \
+    --query 'SnapshotId' \
+    --output text)
+  if [[ -z "${new_snapshot_id}" || "${new_snapshot_id}" == "None" ]]; then
+    echo "Failed to copy snapshot ${snapshot_id}." >&2
+    exit 1
+  fi
+
+  aws ec2 create-tags \
+    --region "${AWS_REGION}" \
+    --resources "${new_snapshot_id}" \
+    --tags "Key=Name,Value=openpcc-copy-${snapshot_id}" \
+           "Key=OpenPccSourceSnapshot,Value=${snapshot_id}" \
+           "Key=OpenPccNitroTpm,Value=true"
+
+  echo "Waiting for snapshot ${new_snapshot_id} to complete..." >&2
+  aws ec2 wait snapshot-completed --region "${AWS_REGION}" --snapshot-ids "${new_snapshot_id}"
+  echo "${new_snapshot_id}"
+}
+
 resolve_nitrotpm_ami() {
   local source_ami="${COMPUTE_AMI_ID}"
   echo "Checking NitroTPM support for AMI ${source_ami}"
@@ -164,6 +210,7 @@ resolve_nitrotpm_ami() {
   local source_boot_mode="${boot_mode}"
   local source_root_device_name="${root_device_name}"
   local source_root_bdm_json="${root_bdm_json}"
+  local source_root_snapshot_id="${root_snapshot_id}"
   local source_architecture="${architecture}"
   local source_virtualization_type="${virtualization_type}"
   local source_ena_support="${ena_support}"
@@ -197,13 +244,34 @@ resolve_nitrotpm_ami() {
     echo "TPM_SUPPORT is empty; cannot register NitroTPM AMI." >&2
     exit 1
   fi
-  if [[ -z "${source_root_device_name}" || -z "${source_root_bdm_json}" ]]; then
+  if [[ -z "${source_root_device_name}" || -z "${source_root_bdm_json}" || -z "${source_root_snapshot_id}" ]]; then
     echo "Failed to determine root snapshot for ${source_ami}; cannot register NitroTPM AMI." >&2
     exit 1
   fi
   if [[ -z "${source_architecture}" || -z "${source_virtualization_type}" ]]; then
     echo "Missing AMI metadata (architecture/virtualization_type) for ${source_ami}." >&2
     exit 1
+  fi
+
+  local owned_snapshot_id
+  owned_snapshot_id="$(ensure_snapshot_owned "${source_root_snapshot_id}")"
+  if [[ "${owned_snapshot_id}" != "${source_root_snapshot_id}" ]]; then
+    source_root_bdm_json="$(python3 - "${source_root_bdm_json}" "${owned_snapshot_id}" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+new_snapshot_id = sys.argv[2]
+bdm = json.loads(raw)
+if not isinstance(bdm, list) or not bdm:
+    raise SystemExit("invalid block device mapping json")
+ebs = bdm[0].get("Ebs")
+if not isinstance(ebs, dict):
+    raise SystemExit("missing ebs mapping")
+ebs["SnapshotId"] = new_snapshot_id
+print(json.dumps(bdm))
+PY
+)"
   fi
 
   local timestamp
