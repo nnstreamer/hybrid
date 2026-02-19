@@ -2,6 +2,7 @@
 Description=OpenPCC TCP to vsock health proxy
 After=network-online.target openpcc-enclave.service
 Wants=network-online.target openpcc-enclave.service
+Requires=openpcc-enclave.service
 
 [Service]
 Type=simple
