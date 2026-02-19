@@ -56,6 +56,10 @@ on:
         type: string
         description: Base AMI ID (Ubuntu 22.04 recommended)
         default: ""
+      compute_ami_id:
+        type: string
+        description: Optional server-2 AMI override (defaults to ami_id)
+        default: ""
       compute_instance_type:
         type: string
         description: server-2 instance type (Nitro Enclaves enabled)
@@ -609,6 +613,7 @@ jobs:
       RESOLVED_INSTANCE_PROFILE_ARN: ${{ inputs.instance_profile_arn != '' && inputs.instance_profile_arn || vars.OPENPCC_INSTANCE_PROFILE_ARN }}
       RESOLVED_KEY_NAME: ${{ inputs.key_name != '' && inputs.key_name || vars.OPENPCC_KEY_NAME }}
       RESOLVED_AMI_ID: ${{ inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
+      RESOLVED_COMPUTE_AMI_ID: ${{ inputs.compute_ami_id != '' && inputs.compute_ami_id || inputs.ami_id != '' && inputs.ami_id || vars.OPENPCC_AMI_ID }}
       RESOLVED_COMPUTE_INSTANCE_TYPE: ${{ inputs.compute_instance_type }}
       RESOLVED_EDGE_INSTANCE_TYPE: ${{ inputs.edge_instance_type }}
       RESOLVED_ENABLE_COMPUTE_MONITOR: ${{ inputs.enable_compute_monitor }}
@@ -705,7 +710,7 @@ jobs:
           require "server1_internal_addr" "${SERVER1_INTERNAL_ADDR}"
           require "server1_router_url" "${SERVER1_ROUTER_URL}"
           require "server1_gateway_url" "${SERVER1_GATEWAY_URL}"
-          require "ami_id" "${RESOLVED_AMI_ID}"
+          require "compute_ami_id" "${RESOLVED_COMPUTE_AMI_ID}"
           require "image_registry" "${IMAGE_REGISTRY}"
           if [[ "${IMAGE_REGISTRY}" != public.ecr.aws/* ]]; then
             require "instance_profile_arn" "${RESOLVED_INSTANCE_PROFILE_ARN}"
@@ -790,7 +795,7 @@ jobs:
       - name: Validate compute AMI NitroTPM support
         env:
           AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
-          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
         run: |
           set -euo pipefail
           if [ -z "${AMI_ID}" ]; then
@@ -830,6 +835,7 @@ jobs:
           INSTANCE_PROFILE_ARN: ${{ env.RESOLVED_INSTANCE_PROFILE_ARN }}
           KEY_NAME: ${{ env.RESOLVED_KEY_NAME }}
           AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+          COMPUTE_AMI_ID: ${{ env.RESOLVED_COMPUTE_AMI_ID }}
           COMPUTE_INSTANCE_TYPE: ${{ env.RESOLVED_COMPUTE_INSTANCE_TYPE }}
           ENABLE_COMPUTE_MONITOR: ${{ env.RESOLVED_ENABLE_COMPUTE_MONITOR }}
           ROUTER_ADDRESS: ${{ env.SERVER1_ROUTER_URL }}
