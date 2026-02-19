@@ -787,6 +787,38 @@ jobs:
             "${bundle_file}:application/json"
           echo "COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF=${bundle_ref}" >> "${GITHUB_ENV}"
 
+      - name: Validate compute AMI NitroTPM support
+        env:
+          AWS_REGION: ${{ env.RESOLVED_AWS_REGION }}
+          AMI_ID: ${{ env.RESOLVED_AMI_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${AMI_ID}" ]; then
+            echo "Missing AMI_ID for NitroTPM validation." >&2
+            exit 1
+          fi
+          echo "Checking NitroTPM support for AMI ${AMI_ID}"
+          read -r tpm_support boot_mode < <(aws ec2 describe-images \
+            --region "${AWS_REGION}" \
+            --image-ids "${AMI_ID}" \
+            --query 'Images[0].[TpmSupport,BootMode]' \
+            --output text)
+          if [ "${tpm_support}" = "None" ]; then
+            tpm_support=""
+          fi
+          if [ "${boot_mode}" = "None" ]; then
+            boot_mode=""
+          fi
+          echo "AMI ${AMI_ID} TPM support: ${tpm_support:-unset}, boot mode: ${boot_mode:-unset}"
+          if [ "${tpm_support}" != "v2.0" ]; then
+            echo "AMI ${AMI_ID} is not NitroTPM-enabled (TpmSupport must be v2.0)." >&2
+            exit 1
+          fi
+          if [ "${boot_mode}" != "uefi" ] && [ "${boot_mode}" != "uefi-preferred" ]; then
+            echo "AMI ${AMI_ID} must use UEFI boot mode for NitroTPM (got ${boot_mode:-unset})." >&2
+            exit 1
+          fi
+
       - name: Deploy server-2
         env:
           COMPONENT: server-2
