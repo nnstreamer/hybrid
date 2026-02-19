@@ -464,11 +464,13 @@ envsubst '\${TC}' < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/s
 envsubst '\${TP}' < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
 envsubst '\${RC} \${EC}' < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
 envsubst '\${CPU} \${MEM} \${EC} \${NR}' < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
+cp "\${ES}/systemd/openpcc-enclave-prepare.service.tmpl" /etc/systemd/system/openpcc-enclave-prepare.service
 
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
+systemctl enable openpcc-enclave-prepare.service
 systemctl enable openpcc-enclave.service
 if [[ "\${ECM}" == "true" ]]; then
   MONITOR_DIR="/opt/openpcc/compute-monitor"
@@ -482,28 +484,26 @@ fi
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
-CONFIG_DIR="\$(mktemp -d)"
-EL="\${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
-ED="\${CONFIG_DIR}/binary_bios_measurements"
-if [[ -s "\${EL}" ]]; then
-  cp "\${EL}" "\${ED}"
-else
-  echo "Missing event log: \${EL}" >&2
-  exit 1
-fi
-export RC TC TP CH PU SB
-envsubst '\${RC} \${TC} \${TP} \${CH} \${PU}' < "\${ES}/config/router_com.yaml.tmpl" > "\${CONFIG_DIR}/router_com.yaml"
-envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${CONFIG_DIR}/compute_boot.yaml"
-
-cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
-FROM ${compute_image_uri}
-COPY router_com.yaml /etc/openpcc/router_com.yaml
-COPY binary_bios_measurements /etc/openpcc/binary_bios_measurements
-COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
-DOCKER_EOF
-docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
-nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EF}"
-rm -rf "\${CONFIG_DIR}"
+ELS="\${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
+EWS="\${TPM_EVENT_LOG_WAIT_SECONDS:-180}"
+EWI="\${TPM_EVENT_LOG_WAIT_INTERVAL:-2}"
+ENV_FILE="/etc/openpcc/enclave-prepare.env"
+mkdir -p /etc/openpcc
+cat > "\${ENV_FILE}" <<EOF_ENV
+RC=\${RC}
+TC=\${TC}
+TP=\${TP}
+CH=\${CH}
+PU=\${PU}
+SB=\${SB}
+ES=\${ES}
+COMPUTE_IMAGE_URI=${compute_image_uri}
+TPM_EVENT_LOG_SOURCE=\${ELS}
+TPM_EVENT_LOG_WAIT_SECONDS=\${EWS}
+TPM_EVENT_LOG_WAIT_INTERVAL=\${EWI}
+EOF_ENV
+chmod 600 "\${ENV_FILE}"
+chmod +x "\${ES}/openpcc-enclave-prepare.sh"
 
 systemctl start openpcc-enclave.service
 
