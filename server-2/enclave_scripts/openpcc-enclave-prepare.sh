@@ -26,12 +26,22 @@ EVENT_LOG_SOURCE="${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_
 EVENT_LOG_WAIT_SECONDS="${TPM_EVENT_LOG_WAIT_SECONDS:-180}"
 EVENT_LOG_WAIT_INTERVAL="${TPM_EVENT_LOG_WAIT_INTERVAL:-2}"
 
+CONFIG_DIR="$(mktemp -d)"
+cleanup() {
+  rm -rf "${CONFIG_DIR}"
+}
+trap cleanup EXIT
+
+EVENT_LOG_DEST="${CONFIG_DIR}/binary_bios_measurements"
 log "Waiting for TPM event log at ${EVENT_LOG_SOURCE}"
 start_ts="$(date +%s)"
 while true; do
-  if [[ -s "${EVENT_LOG_SOURCE}" ]]; then
-    log "TPM event log is ready"
-    break
+  if [[ -r "${EVENT_LOG_SOURCE}" ]]; then
+    dd if="${EVENT_LOG_SOURCE}" of="${EVENT_LOG_DEST}" bs=1M status=none || true
+    if [[ -s "${EVENT_LOG_DEST}" ]]; then
+      log "TPM event log captured at ${EVENT_LOG_DEST}"
+      break
+    fi
   fi
   now_ts="$(date +%s)"
   elapsed="$((now_ts - start_ts))"
@@ -41,14 +51,6 @@ while true; do
   fi
   sleep "${EVENT_LOG_WAIT_INTERVAL}"
 done
-
-CONFIG_DIR="$(mktemp -d)"
-cleanup() {
-  rm -rf "${CONFIG_DIR}"
-}
-trap cleanup EXIT
-
-cp "${EVENT_LOG_SOURCE}" "${CONFIG_DIR}/binary_bios_measurements"
 
 if ! command -v envsubst >/dev/null 2>&1; then
   log "envsubst not found; cannot render configs"
