@@ -22,6 +22,14 @@ require_env SB
 require_env ES
 require_env COMPUTE_IMAGE_URI
 
+HOME="${HOME:-/root}"
+export HOME
+if [[ -z "${NITRO_CLI_ARTIFACTS:-}" ]]; then
+  NITRO_CLI_ARTIFACTS="/var/lib/nitro_enclaves/artifacts"
+fi
+export NITRO_CLI_ARTIFACTS
+mkdir -p "${NITRO_CLI_ARTIFACTS}"
+
 EVENT_LOG_SOURCE="${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
 EVENT_LOG_WAIT_SECONDS="${TPM_EVENT_LOG_WAIT_SECONDS:-180}"
 EVENT_LOG_WAIT_INTERVAL="${TPM_EVENT_LOG_WAIT_INTERVAL:-2}"
