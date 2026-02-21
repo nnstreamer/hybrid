@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenPCC evidence bridge (host unix to enclave vsock)
+After=network-online.target openpcc-enclave.service
+Wants=network-online.target openpcc-enclave.service
+Requires=openpcc-enclave.service
+ConditionPathExists=/etc/openpcc/evidence-bridge.env
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/openpcc/evidence-bridge.env
+ExecStart=/usr/bin/socat UNIX-LISTEN:/tmp/router.sock,fork,unlink-early VSOCK-CONNECT:${EC}:${EVP}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

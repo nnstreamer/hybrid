@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenPCC vsock proxy to TPM simulator (cmd)
+After=network-online.target openpcc-tpm-sim.service
+Wants=network-online.target openpcc-tpm-sim.service
+Requires=openpcc-tpm-sim.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml ${TC} 127.0.0.1 ${TC}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

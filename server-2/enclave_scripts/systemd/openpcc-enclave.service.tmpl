@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenPCC Nitro Enclave
+After=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service openpcc-enclave-prepare.service
+Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service openpcc-enclave-prepare.service
+Requires=openpcc-enclave-prepare.service nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count ${CPU} --memory ${MEM} --enclave-cid ${EC} ${NR}
+ExecStop=/usr/bin/nitro-cli terminate-enclave --all
+
+[Install]
+WantedBy=multi-user.target

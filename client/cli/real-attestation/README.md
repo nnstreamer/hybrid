@@ -36,9 +36,43 @@ This CLI requires the `-ohttp` flag:
 - `-ohttp=enable` (relay + gateway)
 
 When `-ohttp=enable`, you must also set:
-- `RELAY_URL` (or `OPENPCC_RELAY_URL`)
-- `OHTTP_SEEDS_JSON` (or `OPENPCC_OHTTP_SEEDS_JSON`)
+- `SERVER3_URL` (or `OPENPCC_SERVER3_URL`)
+
+The relay URL can be set directly **or** fetched from server-3 `/api/config`.
+The oHTTP **public key bundle** is always fetched from server-3, so `OHTTP_SEEDS_JSON`
+is **not required** for this CLI.
 `ROUTER_URL` is not required in this mode.
+
+### Option A) Relay URL 직접 지정
+```bash
+export RELAY_URL="http://<server4-public-ip>:3100"
+# or
+export OPENPCC_RELAY_URL="http://<server4-public-ip>:3100"
+```
+
+### Option B) server-3에서 relay URL 자동 추출
+```bash
+export SERVER3_URL="http://<server3-public-ip>:8080"
+# or
+export OPENPCC_SERVER3_URL="http://<server3-public-ip>:8080"
+```
+
+또는 `/etc/nnstreamer/hybrid.ini`:
+```ini
+server3_url=http://<server3-public-ip>:8080
+# (auth_url도 허용)
+```
+
+이 경우 실행 시 **server-3에서 relay_urls를 가져오는 로그가 출력**됩니다.
+
+### OHTTP 공개키 번들 (server-3에서 자동 획득)
+```bash
+export SERVER3_URL="http://<server3-public-ip>:8080"
+```
+
+## Verification warning (기본 동작)
+real-attestation 검증이 실패하면 **5줄 경고를 출력한 뒤 계속 진행**합니다.
+이는 개발자 시험/성능 비교 목적의 기본 동작입니다.
 
 ## Configure identity policy (required for real attestation)
 Real attestation requires an OIDC identity policy. Provide it via env vars
@@ -93,6 +127,6 @@ go run . -ohttp=disable
 Example (oHTTP enabled):
 ```bash
 export RELAY_URL="http://<relay-ip>:3100"
-export OHTTP_SEEDS_JSON='[{"key_id":"01","seed_hex":"...","active_from":"2026-01-30T00:00:00Z","active_until":"2026-07-30T00:00:00Z"}]'
+export SERVER3_URL="http://<server3-public-ip>:8080"
 go run . -ohttp=enable
 ```

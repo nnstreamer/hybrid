@@ -2,20 +2,26 @@
 
 이 문서는 **oHTTP 포함** 경로로 `server-1/2/3/4` 전체를 통과하는
 간단한 테스트를 수행하는 방법을 설명합니다.
-테스트 클라이언트는 `/client/cli/fake-attestation`을 사용합니다.
+oneshot deploy 기본값은 **real attestation**이므로,
+기본 테스트 클라이언트는 `/client/cli/real-attestation`입니다.
+`/client/cli/fake-attestation`은 **fake attestation 빌드**에서만 사용하세요.
 
 ---
 
 ## 1) 사전 조건 (공통)
 
 - 테스트 대상 서버가 실행 중이어야 합니다.
-  - fake_attestation은 **fake attestation** 경로이므로
-    `enable_fake_attestation_for_server2=true` 환경을 전제로 합니다.
+  - oneshot deploy 기본값은 **real attestation**입니다.
+  - `fake-attestation` CLI를 사용할 경우
+    `enable_fake_attestation_for_server2=true`로 배포해야 합니다.
 - 테스트를 실행하는 머신에서 필요한 포트에 접근 가능해야 합니다.
-  - oHTTP 포함 시: `server-4(3100/tcp)`, `server-3(8080/tcp)`(시나리오 A에서만)
+- oHTTP 포함 시: `server-4(3100/tcp)`, `server-3(8080/tcp)`(시나리오 A에서만)
   - oHTTP 미사용 시: `server-1(3600/tcp)`
-- oHTTP 시나리오에서는 **OHTTP_SEEDS_JSON** 값이 필요합니다.
-  - 포맷은 `HOW-TO-DEPLOY.md`의 **6-2a** 섹션을 참고하세요.
+- oHTTP 시나리오에서
+  - **real-attestation CLI**는 `server-3 /api/config`의 공개키 번들을 사용하므로
+    **OHTTP_SEEDS_JSON이 필요하지 않습니다.**
+  - **fake-attestation CLI** 또는 **server-3 없이 테스트**하는 경우에는
+    **OHTTP_SEEDS_JSON**이 필요합니다.
 
 ---
 
@@ -24,7 +30,7 @@
 시나리오 A는 아래 경로를 통과합니다.
 
 ```
-fake_attestation client
+real_attestation client (oneshot 기본) / fake_attestation client (fake attestation 빌드 시)
   -> server-4 (relay)
   -> server-1 (gateway)
   -> server-1 (router)
@@ -34,9 +40,12 @@ fake_attestation client
 또한 `server-3`는 `/api/config` 응답으로
 oHTTP 키/릴레이 설정이 정상인지 확인합니다.
 
+> oneshot 기본 테스트는 **11) real-attestation CLI**를 참고하세요.
+> fake-attestation 경로는 **fake attestation 빌드**에서만 사용 가능합니다.
+
 ---
 
-## 3) OHTTP_SEEDS_JSON 설정 방법
+## 3) OHTTP_SEEDS_JSON 설정 방법 (fake-attestation / server-3 구성용)
 
 `OHTTP_SEEDS_JSON`은 **JSON 배열 문자열**이어야 합니다.
 다음 방식 중 하나를 사용하세요.
@@ -82,8 +91,14 @@ SERVER3_URL="http://<server3-public-ip>:8080"
 RELAY_URL="http://<server4-public-ip>:3100"
 ```
 
-### 4-3. OHTTP_SEEDS_JSON
+> real-attestation CLI는 `SERVER3_URL`만 주면 relay URL을 자동 추출합니다.  
+> `fake-attestation` CLI는 `RELAY_URL`이 필요합니다.
+> 또한 real-attestation CLI는 server-3에서 **oHTTP 공개키 번들**을 받아 사용합니다.
 
+### 4-3. OHTTP_SEEDS_JSON (fake-attestation / server-3 구성용)
+
+real-attestation CLI에는 필요하지 않습니다.
+fake-attestation CLI 또는 server-3 구성 확인에 사용할 경우,
 배포에 사용한 JSON을 그대로 사용합니다.
 
 예시(형식):
@@ -129,6 +144,9 @@ curl -s "${SERVER3_URL}/api/config" | jq .
 
 ## 6) fake_attestation 실행 (시나리오 A: oHTTP 포함)
 
+> 이 시나리오는 **fake attestation 빌드**를 전제로 합니다.
+> oneshot 기본값은 real attestation이므로, 기본 테스트는 11) 섹션을 사용하세요.
+
 ### 6-1. 환경 변수 설정
 
 ```bash
@@ -169,6 +187,7 @@ go run . -ohttp=enable
 - `server-3 /api/config`가 5xx:
   - server-3 config JSON 형식 확인
   - `ohttp_seeds` 형식/필수 필드(`key_id`, `seed_hex`, `active_from`, `active_until`)
+  - `ohttp_key_configs_bundle`/`ohttp_key_rotation_periods` 출력 여부
 - `fake_attestation`가 4xx/5xx:
   - `OHTTP_SEEDS_JSON`이 **server-1/server-3와 동일**한지 확인
   - `active_from/active_until` 기간이 현재 시간과 겹치는지 확인
@@ -223,4 +242,40 @@ go run . -ohttp=disable
 ### 10-3. 성공 기준
 
 - `fake_attestation` 실행 결과가 2xx 응답이며 본문이 출력됨
+
+---
+
+## 11) real-attestation CLI (Nitro Enclave, oHTTP 경로)
+
+> 이 경로는 `client/cli/real-attestation`을 사용합니다.  
+> server-3의 `/api/config`에서 relay URL과 **oHTTP 공개키 번들**을 자동 추출하며,  
+> **검증 실패 시에도 5줄 경고 출력 후 계속 진행**하도록 기본 설정됩니다
+> (성능 비교용 경로 유지 목적).
+
+### 11-1. 준비
+
+- `server-1/2/3/4`가 실행 중인지 확인
+- `SERVER3_URL` 준비
+- OIDC 정책 값 준비 (`OPENPCC_OIDC_ISSUER`, `OPENPCC_OIDC_SUBJECT` 또는 regex)
+
+### 11-2. 실행 예시
+
+```bash
+export SERVER3_URL="http://<server3-public-ip>:8080"
+export OPENPCC_OIDC_ISSUER="https://oidc.example.com"
+export OPENPCC_OIDC_SUBJECT="user@example.com"
+
+cd client/cli/real-attestation
+go run . -ohttp=enable
+```
+
+### 11-3. 경고 출력 예시
+
+```
+********************
+* REAL ATTEST WARN *
+* node_id=...      *
+* verify failed... *
+********************
+```
 

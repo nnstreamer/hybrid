@@ -151,6 +151,7 @@ base64 -d /etc/openpcc/server-3.json.b64 > /etc/openpcc/server-3.json
 rm -f /etc/openpcc/server-3.json.b64
 docker run -d --restart unless-stopped --name openpcc-auth \
   -p ${SERVER3_PORT}:${SERVER3_PORT} \
+  -v /etc/openpcc:/etc/openpcc:ro \
   -e SERVER3_CONFIG_PATH=/etc/openpcc/server-3.json \
   -e SERVER3_PORT=${SERVER3_PORT} \
   -e SERVER3_BIND_ADDR=${SERVER3_BIND_ADDR} \

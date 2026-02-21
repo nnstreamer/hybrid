@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenPCC enclave preparation (TPM event log + EIF)
+After=network-online.target docker.service systemd-udev-settle.service
+Wants=network-online.target systemd-udev-settle.service
+Requires=docker.service
+Before=openpcc-enclave.service
+ConditionPathExists=/etc/openpcc/enclave-prepare.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/openpcc/enclave-prepare.env
+ExecStart=/opt/openpcc/enclave_scripts/openpcc-enclave-prepare.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

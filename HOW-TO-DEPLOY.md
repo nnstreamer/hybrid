@@ -173,9 +173,19 @@ aws iam list-instance-profiles-for-role --role-name <ROLE_NAME>
 
 GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니다.  
 이 워크플로는 **build/pack/deploy를 한 번에** 수행하며,  
-`server-1 → server-4 → server-3 → server-2` 순서로 **순차 배포**를 진행합니다.
+Stage A(server-1 + server-4) → Stage B(server-2) → Stage C(server-3) 순서로 진행합니다.  
+Stage C는 server-2의 **REK tag/이미지 digest**를 확인한 뒤 server-3 설정을 생성합니다.
+
+> 참고: GitHub Actions는 output에 secret-like 값이 포함되면 출력을 차단할 수 있습니다.  
+> 예: `##warning## Skip output 'relay_urls_json' since it may contain secret.`  
+> `relay_urls_json` 출력이 차단되더라도 Stage C에서 **server-4 인스턴스를 조회해 relay URL을 자동 생성**합니다.  
+> 따라서 **oneshot deploy 기준으로 relay URL을 input/variable로 제공할 필요가 없습니다**  
+> (단, server-4를 비활성화한 경우는 예외입니다).
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
+
+> server-2는 **호스트에서 compute_boot를 실행**하고, evidence는 **VSOCK 브릿지로 enclave의 router_com**에 전달합니다.  
+> 따라서 호스트에서 `/dev/tpmrm0` 및 `/sys/kernel/security/tpm0/binary_bios_measurements` 접근이 가능해야 합니다.
 
 ### 6-1. 필수 입력값 (직접 입력 또는 저장값 필요)
 
@@ -200,7 +210,9 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 - `enable_compute_monitor` (server-2 모니터 설치)
 - `compute_instance_type`, `edge_instance_type`
 - `enclave_cpu_count`, `enclave_memory_mib`, `enclave_cid`
-- `OPENPCC_RELAY_URLS_JSON` (enable_server3_ohttp_advertise=true 이면서 server-4를 배포하지 않을 때 필요)
+- `OPENPCC_RELAY_URLS_JSON`  
+  - **enable_server4=false** 이고 **enable_server3_ohttp_advertise=true** 인 경우에만 필요
+  - 기본 oneshot deploy에서는 server-4를 배포하므로 입력을 기대하지 않습니다.
 
 > `enable_real_attestation_for_client=true`와 `enable_fake_attestation_for_server2=true`는 동시에 사용할 수 없습니다.
 >
@@ -212,6 +224,15 @@ GitHub Actions → `OpenPCC v0.002 One-shot Deploy` 워크플로를 실행합니
 `one-shot deploy`는 oHTTP seed를 구성하기 위해 `OHTTP_SEEDS_JSON`을 읽습니다.  
 `OHTTP_SEEDS_SECRET_REF`는 `deploy_server1.sh`가 **JSON을 조회해 주입할 때만** 사용됩니다
 (gateway 자체는 `OHTTP_SEEDS_JSON`만 읽습니다).
+
+> 참고: `OHTTP_SEEDS_JSON`은 **server-1/gateway 및 server-3용** 입력입니다.  
+> real-attestation CLI는 server-3의 **oHTTP 공개키 번들**을 사용하므로
+> client 측에서는 seed를 요구하지 않습니다.
+> server-1/gateway는 `seed_hex`와 `key_id`를 결합해
+> `SHA256(seed || key_id)`로 **실제 KEM seed를 파생**합니다.
+
+> relay URL은 Stage C에서 server-4 인스턴스를 조회해 자동 생성됩니다.  
+> 따라서 **relay URL을 input/variable로 제공할 필요가 없습니다**(server-4 비활성화 시 제외).
 
 **필수(One-shot deploy에서 enable_server3_ohttp_advertise=true): OHTTP_SEEDS_JSON 직접 입력**
 - GitHub Secrets: `OPENPCC_OHTTP_SEEDS_JSON` (권장)
@@ -275,6 +296,26 @@ aws secretsmanager create-secret \
 > 주의: `deploy_server1.sh`는 일부 저장소(AWS Secrets Manager/SSM)만 조회합니다.  
 > `server-1` gateway 자체는 **OHTTP_SEEDS_JSON만** 읽습니다.
 
+### 6-2b. Sigstore bundle 자동 주입 (compute 이미지)
+
+real-attestation 경로에서 `compute_boot`는 **이미지 Sigstore bundle**을 요구합니다.
+one-shot deploy는 **server-2 이미지 빌드 후 cosign(keyless)**으로 bundle을 생성하고,
+**ECR Public Repo에 OCI artifact(tag)로 업로드**합니다. server-2는 부팅 시
+`oras pull`로 bundle을 내려받아 사용합니다.
+
+필요 조건:
+- GitHub Actions OIDC (`id-token: write`)
+- Sigstore(Fulcio/Rekor) 접근 가능
+
+수동 실행 시에는 다음 중 하나를 사용합니다:
+```bash
+# 1) 직접 주입 (user_data 크기 제한에 걸릴 수 있음)
+export COMPUTE_IMAGE_SIGSTORE_BUNDLE="$(base64 -w 0 compute.bundle)"
+
+# 2) ECR Public OCI artifact 참조 (권장)
+export COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF="public.ecr.aws/<alias>/openpcc-compute:bundle-<IMAGE_TAG>"
+```
+
 ### 6-3. 개발용 TPM 시뮬레이터/프록시 구성
 
 - 개발/로컬 테스트는 **TPM Simulator(mssim)** 를 사용합니다.
@@ -283,6 +324,8 @@ aws secretsmanager create-secret \
   - `openpcc-vsock-router`, `openpcc-vsock-tpm-*`: Enclave → Router/TPM 접근용 VSOCK 프록시
   - `openpcc-enclave-health-proxy`: Router → Enclave(8081) 헬스체크 프록시
 - **운영 환경에서는 TPM Simulator를 제거**하고 **Nitro Enclave Attestation(NSM 기반)**으로 교체해야 합니다.
+- v0.002 기준 구현은 **Nitro Enclave(NSM) attestation document를 TEE evidence로 포함**합니다.
+- 개발/시험 환경에서는 TPM simulator를 유지하되, **client real-attestation CLI는 검증 실패 시 경고 후 계속 진행**하도록 기본 설정됩니다.
 - `enclave_cid`는 **VSOCK 주소 식별자**이며, 호스트가 Enclave로 연결할 때 사용합니다.
   - 기본값(16)으로 동작하도록 구성되어 있으며, 변경 시 **호스트/Enclave 프록시가 동일 값**을 사용해야 합니다.
 - TPM 시뮬레이터 포트는 기본적으로 **2321/2322**를 사용하며, 배포 스크립트는 platform 포트를 **cmd 포트 + 1**로 보정합니다.

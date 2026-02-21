@@ -30,12 +30,16 @@ ROUTER_ADDRESS="${ROUTER_ADDRESS:-}"
 ENCLAVE_CPU_COUNT="${ENCLAVE_CPU_COUNT:-2}"
 ENCLAVE_MEMORY_MIB="${ENCLAVE_MEMORY_MIB:-2048}"
 ENCLAVE_CID="${ENCLAVE_CID:-16}"
+EVIDENCE_VSOCK_PORT="${EVIDENCE_VSOCK_PORT:-4500}"
 ROUTER_PROXY_HOST="${ROUTER_PROXY_HOST:-127.0.0.1}"
 ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 NITRO_RUN_ARGS="${NITRO_RUN_ARGS:-}"
 ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR:-true}"
+TPM_SUPPORT="${TPM_SUPPORT:-v2.0}"
+COMPUTE_IMAGE_SIGSTORE_BUNDLE="${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
+COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF:-}"
 
 require_env() {
   local name="$1"
@@ -72,6 +76,249 @@ make_common_args() {
   printf '%s\n' "${args[@]}"
 }
 
+load_image_info() {
+  local image_id="$1"
+  local image_json
+  image_json="$(mktemp)"
+  aws ec2 describe-images --region "${AWS_REGION}" --image-ids "${image_id}" --output json > "${image_json}"
+  local assignments
+  assignments="$(python3 - "${image_json}" <<'PY'
+import json
+import shlex
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+images = data.get("Images") or []
+if not images:
+    sys.exit(2)
+
+img = images[0]
+
+def q(val: object) -> str:
+    if val is None:
+        return shlex.quote("")
+    return shlex.quote(str(val))
+
+def bool_str(val: object) -> str:
+    return "true" if val else "false"
+
+print(f"tpm_support={q(img.get('TpmSupport'))}")
+print(f"boot_mode={q(img.get('BootMode'))}")
+print(f"root_device_name={q(img.get('RootDeviceName'))}")
+print(f"architecture={q(img.get('Architecture'))}")
+print(f"virtualization_type={q(img.get('VirtualizationType'))}")
+print(f"ena_support={q(bool_str(img.get('EnaSupport')))}")
+print(f"sriov_net_support={q(img.get('SriovNetSupport'))}")
+
+root_name = img.get("RootDeviceName")
+bdm_json = ""
+root_snapshot_id = ""
+if root_name:
+    for bdm in img.get("BlockDeviceMappings", []):
+        if bdm.get("DeviceName") != root_name:
+            continue
+        ebs = bdm.get("Ebs") or {}
+        if not ebs.get("SnapshotId"):
+            continue
+        allowed = [
+            "SnapshotId",
+            "VolumeSize",
+            "VolumeType",
+            "DeleteOnTermination",
+            "Iops",
+            "Throughput",
+        ]
+        ebs_filtered = {key: ebs[key] for key in allowed if key in ebs}
+        root_snapshot_id = ebs_filtered.get("SnapshotId") or ""
+        bdm_json = json.dumps([{"DeviceName": root_name, "Ebs": ebs_filtered}])
+        break
+
+print(f"root_bdm_json={q(bdm_json)}")
+print(f"root_snapshot_id={q(root_snapshot_id)}")
+PY
+)"
+  rm -f "${image_json}"
+  if [[ -z "${assignments}" ]]; then
+    echo "Failed to parse AMI metadata for ${image_id}." >&2
+    exit 1
+  fi
+  eval "${assignments}"
+}
+
+is_nitrotpm_enabled() {
+  local tpm_support="$1"
+  local boot_mode="$2"
+  if [[ "${tpm_support}" != "v2.0" ]]; then
+    return 1
+  fi
+  if [[ "${boot_mode}" != "uefi" && "${boot_mode}" != "uefi-preferred" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+ensure_snapshot_owned() {
+  local snapshot_id="$1"
+  local account_id
+  account_id=$(aws sts get-caller-identity --region "${AWS_REGION}" --query Account --output text)
+  local owner_id
+  owner_id=$(aws ec2 describe-snapshots \
+    --region "${AWS_REGION}" \
+    --snapshot-ids "${snapshot_id}" \
+    --query 'Snapshots[0].OwnerId' \
+    --output text 2>/dev/null || true)
+  if [[ -n "${owner_id}" && "${owner_id}" != "None" && "${owner_id}" == "${account_id}" ]]; then
+    echo "${snapshot_id}"
+    return 0
+  fi
+
+  echo "Copying snapshot ${snapshot_id} into account ${account_id}" >&2
+  local copy_description
+  copy_description="OpenPCC copy of ${snapshot_id}"
+  local new_snapshot_id
+  new_snapshot_id=$(aws ec2 copy-snapshot \
+    --region "${AWS_REGION}" \
+    --source-region "${AWS_REGION}" \
+    --source-snapshot-id "${snapshot_id}" \
+    --description "${copy_description}" \
+    --query 'SnapshotId' \
+    --output text)
+  if [[ -z "${new_snapshot_id}" || "${new_snapshot_id}" == "None" ]]; then
+    echo "Failed to copy snapshot ${snapshot_id}." >&2
+    exit 1
+  fi
+
+  aws ec2 create-tags \
+    --region "${AWS_REGION}" \
+    --resources "${new_snapshot_id}" \
+    --tags "Key=Name,Value=openpcc-copy-${snapshot_id}" \
+           "Key=OpenPccSourceSnapshot,Value=${snapshot_id}" \
+           "Key=OpenPccNitroTpm,Value=true"
+
+  echo "Waiting for snapshot ${new_snapshot_id} to complete..." >&2
+  aws ec2 wait snapshot-completed --region "${AWS_REGION}" --snapshot-ids "${new_snapshot_id}"
+  echo "${new_snapshot_id}"
+}
+
+resolve_nitrotpm_ami() {
+  local source_ami="${COMPUTE_AMI_ID}"
+  echo "Checking NitroTPM support for AMI ${source_ami}"
+  load_image_info "${source_ami}"
+  local source_tpm_support="${tpm_support}"
+  local source_boot_mode="${boot_mode}"
+  local source_root_device_name="${root_device_name}"
+  local source_root_bdm_json="${root_bdm_json}"
+  local source_root_snapshot_id="${root_snapshot_id}"
+  local source_architecture="${architecture}"
+  local source_virtualization_type="${virtualization_type}"
+  local source_ena_support="${ena_support}"
+  local source_sriov_net_support="${sriov_net_support}"
+
+  if is_nitrotpm_enabled "${source_tpm_support}" "${source_boot_mode}"; then
+    echo "Source AMI already NitroTPM-enabled: ${source_ami}"
+    return 0
+  fi
+
+  local cached_ami
+  cached_ami=$(aws ec2 describe-images \
+    --region "${AWS_REGION}" \
+    --owners self \
+    --filters "Name=tag:OpenPccSourceAmi,Values=${source_ami}" \
+              "Name=tag:OpenPccNitroTpm,Values=true" \
+              "Name=state,Values=available" \
+    --query "Images | sort_by(@,&CreationDate)[-1].ImageId" \
+    --output text)
+
+  if [[ -n "${cached_ami}" && "${cached_ami}" != "None" ]]; then
+    load_image_info "${cached_ami}"
+    if is_nitrotpm_enabled "${tpm_support}" "${boot_mode}"; then
+      COMPUTE_AMI_ID="${cached_ami}"
+      echo "Using cached NitroTPM AMI: ${COMPUTE_AMI_ID}"
+      return 0
+    fi
+  fi
+
+  if [[ -z "${TPM_SUPPORT}" ]]; then
+    echo "TPM_SUPPORT is empty; cannot register NitroTPM AMI." >&2
+    exit 1
+  fi
+  if [[ -z "${source_root_device_name}" || -z "${source_root_bdm_json}" || -z "${source_root_snapshot_id}" ]]; then
+    echo "Failed to determine root snapshot for ${source_ami}; cannot register NitroTPM AMI." >&2
+    exit 1
+  fi
+  if [[ -z "${source_architecture}" || -z "${source_virtualization_type}" ]]; then
+    echo "Missing AMI metadata (architecture/virtualization_type) for ${source_ami}." >&2
+    exit 1
+  fi
+
+  local owned_snapshot_id
+  owned_snapshot_id="$(ensure_snapshot_owned "${source_root_snapshot_id}")"
+  if [[ "${owned_snapshot_id}" != "${source_root_snapshot_id}" ]]; then
+    source_root_bdm_json="$(python3 - "${source_root_bdm_json}" "${owned_snapshot_id}" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+new_snapshot_id = sys.argv[2]
+bdm = json.loads(raw)
+if not isinstance(bdm, list) or not bdm:
+    raise SystemExit("invalid block device mapping json")
+ebs = bdm[0].get("Ebs")
+if not isinstance(ebs, dict):
+    raise SystemExit("missing ebs mapping")
+ebs["SnapshotId"] = new_snapshot_id
+print(json.dumps(bdm))
+PY
+)"
+  fi
+
+  local timestamp
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local ami_name
+  ami_name="openpcc-compute-tpm-${source_ami}-${timestamp}"
+  local register_args=(
+    --region "${AWS_REGION}"
+    --name "${ami_name}"
+    --description "OpenPCC NitroTPM AMI from ${source_ami}"
+    --architecture "${source_architecture}"
+    --virtualization-type "${source_virtualization_type}"
+    --root-device-name "${source_root_device_name}"
+    --block-device-mappings "${source_root_bdm_json}"
+    --boot-mode "uefi"
+    --tpm-support "${TPM_SUPPORT}"
+  )
+  if [[ "${source_ena_support}" == "true" ]]; then
+    register_args+=(--ena-support)
+  fi
+  if [[ -n "${source_sriov_net_support}" && "${source_sriov_net_support}" != "None" ]]; then
+    register_args+=(--sriov-net-support "${source_sriov_net_support}")
+  fi
+
+  echo "Registering NitroTPM AMI for ${source_ami}"
+  local new_ami_id
+  new_ami_id=$(aws ec2 register-image "${register_args[@]}" --query 'ImageId' --output text)
+  if [[ -z "${new_ami_id}" || "${new_ami_id}" == "None" ]]; then
+    echo "Failed to register NitroTPM AMI from ${source_ami}." >&2
+    exit 1
+  fi
+  aws ec2 create-tags \
+    --region "${AWS_REGION}" \
+    --resources "${new_ami_id}" \
+    --tags "Key=Name,Value=${ami_name}" \
+           "Key=OpenPccSourceAmi,Value=${source_ami}" \
+           "Key=OpenPccNitroTpm,Value=true" \
+           "Key=OpenPccBootMode,Value=uefi" \
+           "Key=OpenPccTpmSupport,Value=${TPM_SUPPORT}"
+
+  echo "Waiting for NitroTPM AMI ${new_ami_id} to be available..."
+  aws ec2 wait image-available --region "${AWS_REGION}" --image-ids "${new_ami_id}"
+  COMPUTE_AMI_ID="${new_ami_id}"
+  echo "NitroTPM AMI ready: ${COMPUTE_AMI_ID}"
+}
+
 deploy_compute() {
   require_env COMPUTE_SECURITY_GROUP_ID
   if [[ -z "${ROUTER_ADDRESS}" ]]; then
@@ -79,32 +326,39 @@ deploy_compute() {
     echo "Provide ROUTER_ADDRESS when deploying compute without router." >&2
     exit 1
   fi
+  if [[ -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE}" && -z "${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF}" ]]; then
+    echo "Missing COMPUTE_IMAGE_SIGSTORE_BUNDLE or COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF." >&2
+    exit 1
+  fi
   if [[ -z "${COMPUTE_AMI_ID}" ]]; then
     echo "Missing required environment variable: COMPUTE_AMI_ID or AMI_ID" >&2
     exit 1
   fi
-  local monitor_app_b64=""
-  local monitor_service_b64=""
-  if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
-    local monitor_app_path
-    local monitor_service_path
-    monitor_app_path="${ROOT_DIR}/server-2/monitor/app.py"
-    monitor_service_path="${ROOT_DIR}/server-2/monitor/openpcc-compute-monitor.service"
-    if [[ ! -f "${monitor_app_path}" || ! -f "${monitor_service_path}" ]]; then
-      echo "Compute monitor assets not found under server-2/monitor." >&2
-      exit 1
-    fi
-    monitor_app_b64=$(base64 -w 0 "${monitor_app_path}")
-    monitor_service_b64=$(base64 -w 0 "${monitor_service_path}")
-  fi
+  resolve_nitrotpm_ami
   local user_data
   user_data="$(mktemp)"
   user_data_after_reboot="$(mktemp)"
-  cat >"${user_data_after_reboot}" <<EOF
+cat >"${user_data_after_reboot}" <<EOF
 #!/bin/bash
-ENABLE_COMPUTE_MONITOR="${ENABLE_COMPUTE_MONITOR}"
-MONITOR_APP_B64="${monitor_app_b64}"
-MONITOR_SERVICE_B64="${monitor_service_b64}"
+export HOME="/root"
+mkdir -p "${HOME}"
+echo "HOME=${HOME}"
+ECM="${ENABLE_COMPUTE_MONITOR}"
+SB="${COMPUTE_IMAGE_SIGSTORE_BUNDLE}"
+BR="${COMPUTE_IMAGE_SIGSTORE_BUNDLE_REF}"
+RA="${ROUTER_ADDRESS}"
+RC="${ROUTER_COM_PORT:-8081}"
+PH="${ROUTER_PROXY_HOST}"
+PP="${ROUTER_PROXY_PORT}"
+TC="${TPM_SIMULATOR_CMD_PORT}"
+TP="${TPM_SIMULATOR_PLATFORM_PORT}"
+EC="${ENCLAVE_CID}"
+EVP="${EVIDENCE_VSOCK_PORT}"
+CPU="${ENCLAVE_CPU_COUNT}"
+MEM="${ENCLAVE_MEMORY_MIB}"
+NR="${NITRO_RUN_ARGS}"
+ES="/opt/openpcc/enclave_scripts"
+OV="1.3.0"
 modprobe nitro_enclaves || insmod "/usr/lib/modules/\$(uname -r)/kernel/drivers/virt/nitro_enclaves/nitro_enclaves.ko"
 echo "nitro_enclaves" > /etc/modules-load.d/openpcc.conf
 systemctl enable --now docker
@@ -127,249 +381,213 @@ cd ..
 
 docker pull "${compute_image_uri}"
 
-EIF_PATH="/opt/openpcc/compute.eif"
+mkdir -p "\${ES}"
+cid=\$(docker create "${compute_image_uri}")
+docker cp "\${cid}:/enclave_scripts/." "\${ES}"
+CB="/opt/openpcc/compute_boot"
 mkdir -p "/opt/openpcc"
-R_ADDRESS="${ROUTER_ADDRESS}"
-R_COM_PORT="${ROUTER_COM_PORT:-8081}"
+docker cp "\${cid}:/opt/confidentcompute/bin/compute_boot" "\${CB}"
+chmod +x "\${CB}"
+docker rm "\${cid}"
+
+EF="/opt/openpcc/compute.eif"
+if [[ -z "\${SB}" && -n "\${BR}" ]]; then
+  echo "Fetching sigstore bundle: \${BR}"
+  OT="/tmp/oras.tgz"
+  curl -fsSL "https://github.com/oras-project/oras/releases/download/v\${OV}/oras_\${OV}_linux_amd64.tar.gz" -o "\${OT}"
+  tar -xzf "\${OT}" -C /usr/local/bin oras
+  chmod +x /usr/local/bin/oras
+  rm -f "\${OT}"
+  oras version
+  BD="/opt/openpcc/bundle"
+  BF="\${BD}/compute.sigstore.bundle"
+  mkdir -p "\${BD}"
+  (cd "\${BD}" && oras pull "\${BR}")
+  if [[ ! -s "\${BF}" ]]; then
+    echo "Bundle missing: \${BF}" >&2
+    exit 1
+  fi
+  echo "Bundle bytes: \$(stat -c %s "\${BF}")"
+  sha256sum "\${BF}"
+  SB="\$(base64 -w 0 "\${BF}")"
+fi
+if [[ -z "\${SB}" ]]; then
+  echo "Missing sigstore bundle; cannot continue." >&2
+  exit 1
+fi
 
 TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
 if [[ -n "\${TOKEN}" ]]; then
-  COMPUTE_HOST="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+  CH="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 else
-  COMPUTE_HOST="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
+  CH="\$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4 || true)"
 fi
-if [[ -z "\${COMPUTE_HOST}" ]]; then
-  COMPUTE_HOST="\$(hostname -I | awk '{print \$1}' || true)"
+if [[ -z "\${CH}" ]]; then
+  CH="\$(hostname -I | awk '{print \$1}' || true)"
 fi
-if [[ -z "\${COMPUTE_HOST}" ]]; then
+if [[ -z "\${CH}" ]]; then
   echo "Failed to determine compute host IP." >&2
   exit 1
 fi
-R_PROXY_HOST="${ROUTER_PROXY_HOST}"
-R_PROXY_PORT="${ROUTER_PROXY_PORT}"
-R_PROXY_URL="http://\${R_PROXY_HOST}:\${R_PROXY_PORT}"
-TPM_SIM_CMD_PORT="${TPM_SIMULATOR_CMD_PORT}"
-TPM_SIM_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT}"
-ENCLAVE_CID="${ENCLAVE_CID}"
-if [[ "\${TPM_SIM_PLATFORM_PORT}" -ne "\$((TPM_SIM_CMD_PORT + 1))" ]]; then
-  TPM_SIM_PLATFORM_PORT="\$((TPM_SIM_CMD_PORT + 1))"
+PU="http://\${PH}:\${PP}"
+if [[ "\${TP}" -ne "\$((TC + 1))" ]]; then
+  TP="\$((TC + 1))"
 fi
-router_host="\${R_ADDRESS#http://}"
-router_host="\${router_host#https://}"
-router_host="\${router_host%%/*}"
-router_port="3600"
-if [[ "\${router_host}" == *:* ]]; then
-  router_port="\${router_host##*:}"
-  router_host="\${router_host%%:*}"
+RH="\${RA#http://}"
+RH="\${RH#https://}"
+RH="\${RH%%/*}"
+RP="3600"
+if [[ "\${RH}" == *:* ]]; then
+  RP="\${RH##*:}"
+  RH="\${RH%%:*}"
 fi
-if [[ -z "\${router_host}" ]]; then
-  echo "Failed to parse router host from \${R_ADDRESS}" >&2
+if [[ -z "\${RH}" ]]; then
+  echo "Failed to parse router host from \${RA}" >&2
   exit 1
 fi
 mkdir -p /etc/nitro_enclaves
-cat > /etc/nitro_enclaves/vsock-proxy.yaml <<PROXY_EOF
-allowlist:
-  - address: "\${router_host}"
-    port: \${router_port}
-  - address: "127.0.0.1"
-    port: \${TPM_SIM_CMD_PORT}
-  - address: "127.0.0.1"
-    port: \${TPM_SIM_PLATFORM_PORT}
-PROXY_EOF
+export RH RP TC TP
+envsubst '\${RH} \${RP} \${TC} \${TP}' < "\${ES}/vsock-proxy.yaml.tmpl" > /etc/nitro_enclaves/vsock-proxy.yaml
 
-TPM_SIM_DIR="/opt/openpcc/ms-tpm-20-ref"
-TPM_SIM_BIN="\${TPM_SIM_DIR}/TPMCmd/Simulator/src/tpm2-simulator"
-if [[ ! -x "\${TPM_SIM_BIN}" ]]; then
-  rm -rf "\${TPM_SIM_DIR}"
-  git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git "\${TPM_SIM_DIR}"
+TD="/opt/openpcc/ms-tpm-20-ref"
+TB="\${TD}/TPMCmd/Simulator/src/tpm2-simulator"
+if [[ ! -x "\${TB}" ]]; then
+  rm -rf "\${TD}"
+  git clone --depth 1 https://github.com/microsoft/ms-tpm-20-ref.git "\${TD}"
   (
-    cd "\${TPM_SIM_DIR}/TPMCmd"
+    cd "\${TD}/TPMCmd"
     ./bootstrap
     ./configure
     make -j"\$(nproc)"
   )
 fi
 
-cat > /etc/systemd/system/openpcc-tpm-sim.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC TPM simulator (mssim)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=\${TPM_SIM_BIN} \${TPM_SIM_CMD_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-router.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to router
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${R_PROXY_PORT} \${router_host} \${router_port}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-tpm-cmd.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to TPM simulator (cmd)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_CMD_PORT} 127.0.0.1 \${TPM_SIM_CMD_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-vsock-tpm-platform.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC vsock proxy to TPM simulator (platform)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/vsock-proxy --config /etc/nitro_enclaves/vsock-proxy.yaml \${TPM_SIM_PLATFORM_PORT} 127.0.0.1 \${TPM_SIM_PLATFORM_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-enclave-health-proxy.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC TCP to vsock health proxy
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/socat TCP-LISTEN:\${R_COM_PORT},reuseaddr,fork VSOCK-CONNECT:\${ENCLAVE_CID}:\${R_COM_PORT}
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
-
-cat > /etc/systemd/system/openpcc-enclave.service <<UNIT_EOF
-[Unit]
-Description=OpenPCC Nitro Enclave
-After=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
-Wants=network-online.target nitro-enclaves-allocator.service openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service openpcc-tpm-sim.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-Environment=NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
-ExecStart=/usr/bin/nitro-cli run-enclave --eif-path "/opt/openpcc/compute.eif" --cpu-count "${ENCLAVE_CPU_COUNT}" --memory "${ENCLAVE_MEMORY_MIB}" --enclave-cid "${ENCLAVE_CID}" ${NITRO_RUN_ARGS}
-ExecStop=/usr/bin/nitro-cli terminate-enclave --all
-
-[Install]
-WantedBy=multi-user.target
-UNIT_EOF
+export TB TC TP PP RH RP RC EC CPU MEM NR EVP
+envsubst '\${TB} \${TC}' < "\${ES}/systemd/openpcc-tpm-sim.service.tmpl" > /etc/systemd/system/openpcc-tpm-sim.service
+envsubst '\${PP} \${RH} \${RP}' < "\${ES}/systemd/openpcc-vsock-router.service.tmpl" > /etc/systemd/system/openpcc-vsock-router.service
+envsubst '\${TC}' < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-cmd.service
+envsubst '\${TP}' < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
+envsubst '\${RC} \${EC}' < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
+envsubst '\${CPU} \${MEM} \${EC} \${NR}' < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
+envsubst '\${EC} \${EVP}' < "\${ES}/systemd/openpcc-evidence-bridge.service.tmpl" > /etc/systemd/system/openpcc-evidence-bridge.service
+cp "\${ES}/systemd/openpcc-enclave-prepare.service.tmpl" /etc/systemd/system/openpcc-enclave-prepare.service
 
 systemctl daemon-reload
 systemctl enable --now openpcc-tpm-sim.service
 systemctl enable --now openpcc-vsock-router.service openpcc-vsock-tpm-cmd.service openpcc-vsock-tpm-platform.service
 systemctl enable --now openpcc-enclave-health-proxy.service
+systemctl enable openpcc-enclave-prepare.service
 systemctl enable openpcc-enclave.service
-if [[ "${ENABLE_COMPUTE_MONITOR}" == "true" ]]; then
+if [[ "\${ECM}" == "true" ]]; then
   MONITOR_DIR="/opt/openpcc/compute-monitor"
   mkdir -p "\${MONITOR_DIR}"
-  printf '%s' "\${MONITOR_APP_B64}" | base64 -d > "\${MONITOR_DIR}/app.py"
+  cp "\${ES}/monitor/app.py" "\${MONITOR_DIR}/app.py"
   chmod 755 "\${MONITOR_DIR}/app.py"
-  printf '%s' "\${MONITOR_SERVICE_B64}" | base64 -d > /etc/systemd/system/openpcc-compute-monitor.service
+  cp "\${ES}/monitor/openpcc-compute-monitor.service" /etc/systemd/system/openpcc-compute-monitor.service
   systemctl daemon-reload
   systemctl enable --now openpcc-compute-monitor.service
 fi
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
-CONFIG_DIR="\$(mktemp -d)"
-cat > "\${CONFIG_DIR}/router_com.yaml" <<CONFIG_EOF
-http:
-  port: "\${R_COM_PORT}"
-evidence:
-  socket: "\${EVIDENCE_SOCKET:-/tmp/router.sock}"
-  timeout: \${EVIDENCE_TIMEOUT:-30s}
-models:
-  - "\${MODEL_1:-llama3.2:1b}"
-router_com:
-  check_compute_boot_exit: \${CHECK_COMPUTE_BOOT_EXIT:-false}
-  tpm:
-    device: "\${TPM_DEVICE:-/dev/tpmrm0}"
-    simulate: \${SIMULATE_TPM:-true}
-    rek_handle: \${REK_HANDLE:-0x81000002}
-    simulator_cmd_address: "\${SIM_CMD_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_CMD_PORT}}"
-    simulator_platform_address: "\${SIM_PLATFORM_ADDRESS:-127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}}"
-  worker:
-    binary_path: "\${WORKER_BIN_PATH:-/opt/confidentcompute/bin/compute_worker}"
-    llm_base_url: "\${LLM_BASE_URL:-http://127.0.0.1:11434}"
-    badge_public_key: "\${BADGE_PUBLIC_KEY_B64:-LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUNvd0JRWURLMlZ3QXlFQTFKNXJhQTdEZTQ0elFSRVpxU21BbkRMK1RObjFPUUROZW1sWmc4eWc3azg9Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=}"
-router_agent:
-  tags:
-    - llm
-    - "engine=\${INFERENCE_ENGINE_TYPE:-ollama}"
-    - "model=\${MODEL_1:-llama3.2:1b}"
-  node_target_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/"
-  node_healthcheck_url: "http://\${COMPUTE_HOST}:\${R_COM_PORT}/_health"
-  router_base_url: "\${R_PROXY_URL}"
-CONFIG_EOF
+HOST_BOOT_CONFIG="/etc/openpcc/compute_boot.host.yaml"
+HOST_BOOT_ENV="/etc/openpcc/compute-boot-host.env"
+HOST_BOOT_BIN="\${CB}"
+mkdir -p /etc/openpcc
+cat > "\${HOST_BOOT_ENV}" <<EOF_ENV
+TPM_TYPE=QEMU
+TPM_EVENT_LOG_PATH=/sys/kernel/security/tpm0/binary_bios_measurements
+INFERENCE_ENGINE_SKIP=true
+EOF_ENV
+chmod 600 "\${HOST_BOOT_ENV}"
+export TC TP SB
+envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${HOST_BOOT_CONFIG}"
+chmod 600 "\${HOST_BOOT_CONFIG}"
 
-cat > "\${CONFIG_DIR}/compute_boot.yaml" <<CONFIG_EOF
-inference_engine:
-  type: \${INFERENCE_ENGINE_TYPE:-ollama}
-  skip: \${INFERENCE_ENGINE_SKIP:-false}
-  models:
-    - "\${INFERENCE_ENGINE_MODEL_1:-llama3.2:1b}"
-  local_dev: \${INFERENCE_ENGINE_LOCAL_DEV:-true}
-  url: "\${INFERENCE_ENGINE_URL:-http://127.0.0.1:11434}"
-  systemd_service_name: "\${INFERENCE_ENGINE_SERVICE:-ollama.service}"
-tpm:
-  primary_key_handle: \${TPM_PRIMARY_KEY_HANDLE:-0x81000001}
-  child_key_handle: \${TPM_CHILD_KEY_HANDLE:-0x81000002}
-  rek_creation_ticket_handle: \${TPM_REK_TICKET_HANDLE:-0x01c0000A}
-  rek_creation_hash_handle: \${TPM_REK_HASH_HANDLE:-0x01c0000B}
-  attestation_key_handle: \${TPM_ATTESTATION_KEY_HANDLE:-0x81000003}
-  tpm_type: \${TPM_TYPE:-Simulator}
-  simulator_cmd_address: "127.0.0.1:${TPM_SIMULATOR_CMD_PORT}"
-  simulator_platform_address: "127.0.0.1:${TPM_SIMULATOR_PLATFORM_PORT}"
-attestation:
-  fake_secret: "\${FAKE_ATTESTATION_SECRET:-123456}"
-gpu:
-  required: \${GPU_REQUIRED:-false}
-  attestation_mode: \${GPU_ATTESTATION_MODE:-none}
-transparency:
-  image_sigstore_bundle: "\${COMPUTE_IMAGE_SIGSTORE_BUNDLE:-}"
-CONFIG_EOF
+EVIDENCE_ENV="/etc/openpcc/evidence-bridge.env"
+cat > "\${EVIDENCE_ENV}" <<EOF_ENV
+EC=\${EC}
+EVP=\${EVP}
+EOF_ENV
+chmod 600 "\${EVIDENCE_ENV}"
+export HOST_BOOT_CONFIG HOST_BOOT_ENV HOST_BOOT_BIN
+envsubst '\${HOST_BOOT_CONFIG} \${HOST_BOOT_ENV} \${HOST_BOOT_BIN}' < "\${ES}/systemd/openpcc-compute-boot-host.service.tmpl" > /etc/systemd/system/openpcc-compute-boot-host.service
 
-cat > "\${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
-FROM ${compute_image_uri}
-COPY router_com.yaml /etc/openpcc/router_com.yaml
-COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml
-DOCKER_EOF
-docker build -t "${compute_image_uri}-routercfg" "\${CONFIG_DIR}"
-nitro-cli build-enclave --docker-uri "${compute_image_uri}-routercfg" --output-file "\${EIF_PATH}"
-rm -rf "\${CONFIG_DIR}"
+systemctl daemon-reload
+systemctl enable openpcc-evidence-bridge.service
+systemctl enable openpcc-compute-boot-host.service
+
+ELS="\${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
+EWS="\${TPM_EVENT_LOG_WAIT_SECONDS:-180}"
+EWI="\${TPM_EVENT_LOG_WAIT_INTERVAL:-2}"
+ENV_FILE="/etc/openpcc/enclave-prepare.env"
+mkdir -p /etc/openpcc
+cat > "\${ENV_FILE}" <<EOF_ENV
+RC=\${RC}
+TC=\${TC}
+TP=\${TP}
+CH=\${CH}
+PU=\${PU}
+SB=\${SB}
+ES=\${ES}
+COMPUTE_IMAGE_URI=${compute_image_uri}
+EVIDENCE_VSOCK_PORT=\${EVP}
+HOME=/root
+NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
+TPM_EVENT_LOG_SOURCE=\${ELS}
+TPM_EVENT_LOG_WAIT_SECONDS=\${EWS}
+TPM_EVENT_LOG_WAIT_INTERVAL=\${EWI}
+EOF_ENV
+chmod 600 "\${ENV_FILE}"
+chmod +x "\${ES}/openpcc-enclave-prepare.sh"
+
+systemctl start openpcc-enclave.service
+systemctl start openpcc-evidence-bridge.service
+systemctl start openpcc-compute-boot-host.service
+
+if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1; then
+  export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=\${TC}"
+  rek_hash=""
+  REK_TAG_MAX_RETRIES=120
+  REK_TAG_SLEEP_SECONDS=10
+  for i in \$(seq 1 "\${REK_TAG_MAX_RETRIES}"); do
+    if tpm2_readpublic -c 0x81000002 -o /tmp/rek.pub >/dev/null 2>&1; then
+      rek_hash=\$(sha256sum /tmp/rek.pub | awk '{print \$1}')
+      break
+    fi
+    sleep "\${REK_TAG_SLEEP_SECONDS}"
+  done
+  if [ -n "\${rek_hash}" ]; then
+    TOKEN="\$(curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" || true)"
+    if [ -n "\${TOKEN}" ]; then
+      INSTANCE_ID="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/placement/region || true)"
+    else
+      INSTANCE_ID="\$(curl -s http://169.254.169.254/latest/meta-data/instance-id || true)"
+      REGION="\$(curl -s http://169.254.169.254/latest/meta-data/placement/region || true)"
+    fi
+    if [ -z "\${REGION}" ]; then
+      if [ -n "\${TOKEN}" ]; then
+        AZ="\$(curl -s -H "X-aws-ec2-metadata-token: \${TOKEN}" http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+      else
+        AZ="\$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone || true)"
+      fi
+      REGION="\${AZ::-1}"
+    fi
+    if [ -n "\${INSTANCE_ID}" ] && [ -n "\${REGION}" ]; then
+      aws ec2 create-tags \
+        --region "\${REGION}" \
+        --resources "\${INSTANCE_ID}" \
+        --tags "Key=openpcc:rek_hash,Value=sha256:\${rek_hash}" || true
+    else
+      echo "Failed to resolve instance metadata for tagging." >&2
+    fi
+  else
+    echo "Failed to compute REK hash for tagging." >&2
+  fi
+else
+  echo "awscli or tpm2-tools not installed; skipping REK tag update." >&2
+fi
 
 mv \$0 /
 reboot now
@@ -382,7 +600,7 @@ script_after_reboot_b64=$(gzip -c "${user_data_after_reboot}" | base64 -w 0)
 set -eux
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip
+apt-get install -y docker.io python3 curl git build-essential gcc linux-modules-extra-aws socat autoconf autoconf-archive automake pkg-config libssl-dev gzip awscli tpm2-tools gettext-base
 
 cat >"/var/lib/cloud/scripts/per-boot/initserver.sh.gz.b64" <<'INEOF'
 ${script_after_reboot_b64}

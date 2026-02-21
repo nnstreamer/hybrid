@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenPCC TCP to vsock health proxy
+After=network-online.target openpcc-enclave.service
+Wants=network-online.target openpcc-enclave.service
+Requires=openpcc-enclave.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/socat TCP-LISTEN:${RC},reuseaddr,fork VSOCK-CONNECT:${EC}:${RC}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

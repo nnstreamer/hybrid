@@ -16,9 +16,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 
-ARG CONFIDENTCOMPUTE_REF=main
+ARG CONFIDENTCOMPUTE_REF=v0.0.80
 ARG COMPUTE_BOOT_BUILD_TAGS=
-RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git .
+COPY patches/confidentcompute-nitro.patch /tmp/confidentcompute-nitro.patch
+RUN git clone --branch "${CONFIDENTCOMPUTE_REF}" --depth 1 https://github.com/confidentsecurity/confidentcompute.git . \
+  && git apply /tmp/confidentcompute-nitro.patch
+
+RUN set -eu; \
+  echo "== debug: git status =="; \
+  git --no-pager status --short; \
+  echo "== debug: git diff --stat =="; \
+  git --no-pager diff --stat; \
+  echo "== debug: go env =="; \
+  go env GOFLAGS GOPROXY GONOSUMDB GOPRIVATE GOSUMDB; \
+  echo "== debug: go.mod (hf/nsm) =="; \
+  awk '/hf\/nsm/ {print NR ":" $0}' go.mod || true; \
+  echo "== debug: go.sum (nsm/cbor/float16/lint/tools) =="; \
+  awk '/hf\/nsm|fxamacker\/cbor\/v2|x448\/float16|golang\.org\/x\/lint|golang\.org\/x\/tools/ {print NR ":" $0}' go.sum || true; \
+  echo "== debug: go.sum total lines =="; \
+  go list -m -json github.com/fxamacker/cbor/v2 2>/tmp/go-list-cbor.err || true; \
+  if [ -s /tmp/go-list-cbor.err ]; then echo "== debug: go list -m cbor error =="; cat /tmp/go-list-cbor.err; fi; \
+  wc -l go.sum
 
 RUN go mod download
 
@@ -97,6 +115,7 @@ COPY --from=build /out/compute_worker /opt/confidentcompute/bin/compute_worker
 COPY config/compute_boot.yaml /etc/openpcc/compute_boot.yaml
 COPY config/router_com.yaml /etc/openpcc/router_com.yaml
 COPY entrypoint.sh /opt/confidentcompute/bin/entrypoint.sh
+COPY enclave_scripts /enclave_scripts
 
 RUN chmod +x /opt/confidentcompute/bin/entrypoint.sh
 

@@ -1,0 +1,378 @@
+diff --git a/computeboot/evidence.go b/computeboot/evidence.go
+index 808678a..c853c04 100644
+--- a/computeboot/evidence.go
++++ b/computeboot/evidence.go
+@@ -39,12 +39,6 @@ import (
+ 
+ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevice, gpuManager GPUManager, tlogCfg *TransparencyConfig) (ev.SignedEvidenceList, error) {
+ 	result := ev.SignedEvidenceList{}
+-	var teeType ev.TEEType
+-
+-	teeType, err := attest.GetTEEType()
+-	if err != nil {
+-		return nil, err
+-	}
+ 
+ 	tpm, err := tpmDevice.OpenDevice()
+ 	if err != nil {
+@@ -66,112 +60,125 @@ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevic
+ 		return nil, errors.New("array longer than 64 bytes")
+ 	}
+ 
+-	switch teeType {
+-	case ev.Tdx:
+-		switch tpmCfg.TPMType {
+-		case GCE:
+-			teeAttestor, err := attest.NewTDXTEEAttestor(
+-				tpmQuoteHashPadded,
+-			)
+-
+-			if err != nil {
+-				return nil, err
+-			}
+-
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-			if err != nil {
+-				return nil, fmt.Errorf("gce tdx create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
+-
+-			collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("gce tdx collateral failed: %w", err)
+-			}
+-
+-			result = append(result, collateralEvidence)
+-		case Azure:
+-			teeAttestor := attest.NewAzureTDXTEEAttestorWithQuoteService(
+-				tpm,
+-				tpmQuoteHashPadded,
+-				&attest.HTTPMetadataQuoteService{},
+-			)
+-
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("azure tdx create evidence failed: %w", err)
+-			}
+-
+-			result = append(result, teeEvidencePiece)
+-
+-			collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("azure tdx collateral failed: %w", err)
+-			}
+-
+-			result = append(result, collateralEvidence)
+-		case Simulator, InMemorySimulator, QEMU:
+-			// these do nothing, but we have to have this comment for revive:useless-fallthrough
+-			fallthrough
+-		default:
+-			return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
++	if isNitroEnclave() {
++		nitroEvidence, err := createNitroAttestationEvidence(tpmQuoteHashPadded)
++		if err != nil {
++			return nil, fmt.Errorf("nitro attestation failed: %w", err)
++		}
++		result = append(result, nitroEvidence)
++	} else {
++		teeType, err := attest.GetTEEType()
++		if err != nil {
++			return nil, err
+ 		}
+-	case ev.SevSnp:
+-		switch tpmCfg.TPMType {
+-		case GCE:
+-			teeAttestor, err := attest.NewSEVSNPTEEAttestor(
+-				tpmQuoteHashPadded,
+-			)
+-
+-			if err != nil {
+-				return nil, err
+-			}
+-
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("gce sevsnp create evidence failed: %w", err)
+-			}
+-			result = append(result, teeEvidencePiece)
+-		case Azure:
+-			teeAttestor := attest.NewAzureSEVSNPTEEAttestor(
+-				tpm,
+-				tpmQuoteHashPadded,
+-			)
+-
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("azure sevsnp create evidence failed: %w", err)
+-			}
+ 
+-			result = append(result, teeEvidencePiece)
+-		case QEMU:
+-			teeAttestor, err := attest.NewBareMetalSEVSNPTEEAttestor(tpmQuoteHashPadded)
+-			if err != nil {
+-				return nil, err
++		switch teeType {
++		case ev.Tdx:
++			switch tpmCfg.TPMType {
++			case GCE:
++				teeAttestor, err := attest.NewTDXTEEAttestor(
++					tpmQuoteHashPadded,
++				)
++
++				if err != nil {
++					return nil, err
++				}
++
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++				if err != nil {
++					return nil, fmt.Errorf("gce tdx create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
++
++				collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
++
++				if err != nil {
++					return nil, fmt.Errorf("gce tdx collateral failed: %w", err)
++				}
++
++				result = append(result, collateralEvidence)
++			case Azure:
++				teeAttestor := attest.NewAzureTDXTEEAttestorWithQuoteService(
++					tpm,
++					tpmQuoteHashPadded,
++					&attest.HTTPMetadataQuoteService{},
++				)
++
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++
++				if err != nil {
++					return nil, fmt.Errorf("azure tdx create evidence failed: %w", err)
++				}
++
++				result = append(result, teeEvidencePiece)
++
++				collateralEvidence, err := getTDXCollateral(teeEvidencePiece)
++
++				if err != nil {
++					return nil, fmt.Errorf("azure tdx collateral failed: %w", err)
++				}
++
++				result = append(result, collateralEvidence)
++			case Simulator, InMemorySimulator, QEMU:
++				// these do nothing, but we have to have this comment for revive:useless-fallthrough
++				fallthrough
++			default:
++				return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+ 			}
+-
+-			teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
+-
+-			if err != nil {
+-				return nil, fmt.Errorf("qemu sevsnp create evidence failed: %w", err)
++		case ev.SevSnp:
++			switch tpmCfg.TPMType {
++			case GCE:
++				teeAttestor, err := attest.NewSEVSNPTEEAttestor(
++					tpmQuoteHashPadded,
++				)
++
++				if err != nil {
++					return nil, err
++				}
++
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++
++				if err != nil {
++					return nil, fmt.Errorf("gce sevsnp create evidence failed: %w", err)
++				}
++				result = append(result, teeEvidencePiece)
++			case Azure:
++				teeAttestor := attest.NewAzureSEVSNPTEEAttestor(
++					tpm,
++					tpmQuoteHashPadded,
++				)
++
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++
++				if err != nil {
++					return nil, fmt.Errorf("azure sevsnp create evidence failed: %w", err)
++				}
++
++				result = append(result, teeEvidencePiece)
++			case QEMU:
++				teeAttestor, err := attest.NewBareMetalSEVSNPTEEAttestor(tpmQuoteHashPadded)
++				if err != nil {
++					return nil, err
++				}
++
++				teeEvidencePiece, err := teeAttestor.CreateSignedEvidence(context.Background())
++
++				if err != nil {
++					return nil, fmt.Errorf("qemu sevsnp create evidence failed: %w", err)
++				}
++
++				result = append(result, teeEvidencePiece)
++			case Simulator, InMemorySimulator:
++				// these two do nothing, but we have to have this comment for revive:useless-fallthrough
++				fallthrough
++			default:
++				return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+ 			}
+-
+-			result = append(result, teeEvidencePiece)
+-		case Simulator, InMemorySimulator:
+-			// these two do nothing, but we have to have this comment for revive:useless-fallthrough
+-			fallthrough
++		case ev.NoTEE:
++			return nil, errors.New("not running in a TEE")
+ 		default:
+-			return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
++			return nil, fmt.Errorf("unsupported TEE type: %d", teeType)
+ 		}
+-	case ev.NoTEE:
+-		return nil, errors.New("not running in a TEE")
+-	default:
+-		return nil, fmt.Errorf("unsupported TEE type: %d", teeType)
+ 	}
+ 
+ 	switch tpmCfg.TPMType {
+@@ -209,7 +216,7 @@ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevic
+ 		azureCVMRuntimeAttestor := attest.NewAzureCVMRuntimeDataAttestor(tpm, tpmQuoteHashPadded)
+ 		azureCVMRuntimeEvidence, err := azureCVMRuntimeAttestor.CreateSignedEvidence(context.Background())
+ 		result = append(result, azureCVMRuntimeEvidence)
+-	case QEMU:
++	case QEMU, Simulator, InMemorySimulator:
+ 		// instead of attesting the AK certificate, we include the AK TPMT public area in the evidence,
+ 		// and verify that it matches the vTPM TPMT public area in the SEV-SNP services manifest
+ 		tpmtAttestor := attest.NewTPMTPublicAttestor(tpm, tpmutil.Handle(tpmCfg.AttestationKeyHandle), ev.AkTPMTPublic)
+@@ -218,9 +225,6 @@ func collectEvidence(_ *AttestationConfig, tpmCfg *TPMConfig, tpmDevice TPMDevic
+ 			return nil, fmt.Errorf("tpmt create signed evidence failed: %w", err)
+ 		}
+ 		result = append(result, akTPMPTEvidence)
+-	case Simulator, InMemorySimulator:
+-		// these two do nothing, but we have to have this comment for revive:useless-fallthrough
+-		fallthrough
+ 	default:
+ 		return nil, fmt.Errorf("unsupported TPM type for procedure: %s", tpmCfg.TPMType)
+ 	}
+diff --git a/computeboot/nitro_attest.go b/computeboot/nitro_attest.go
+new file mode 100644
+index 0000000..eff1734
+--- /dev/null
++++ b/computeboot/nitro_attest.go
+@@ -0,0 +1,46 @@
++package computeboot
++
++import (
++	"fmt"
++	"os"
++
++	"github.com/hf/nsm"
++	"github.com/hf/nsm/request"
++	ev "github.com/openpcc/openpcc/attestation/evidence"
++)
++
++func isNitroEnclave() bool {
++	_, err := os.Stat("/dev/nsm")
++	return err == nil
++}
++
++func createNitroAttestationEvidence(nonce []byte) (*ev.SignedEvidencePiece, error) {
++	if len(nonce) == 0 {
++		return nil, fmt.Errorf("nitro attestation nonce missing")
++	}
++
++	session, err := nsm.OpenDefaultSession()
++	if err != nil {
++		return nil, fmt.Errorf("open nsm session: %w", err)
++	}
++	defer session.Close()
++
++	resp, err := session.Send(&request.Attestation{
++		Nonce: nonce,
++	})
++	if err != nil {
++		return nil, fmt.Errorf("nsm attestation failed: %w", err)
++	}
++	if resp.Error != "" {
++		return nil, fmt.Errorf("nsm attestation error: %s", resp.Error)
++	}
++	if resp.Attestation == nil || len(resp.Attestation.Document) == 0 {
++		return nil, fmt.Errorf("nsm attestation document missing")
++	}
++
++	return &ev.SignedEvidencePiece{
++		Type:      ev.SevSnpExtendedReport,
++		Data:      resp.Attestation.Document,
++		Signature: []byte{},
++	}, nil
++}
+diff --git a/go.mod b/go.mod
+index f85ffb6..9f0b7f9 100644
+--- a/go.mod
++++ b/go.mod
+@@ -17,6 +17,7 @@ require (
+ 	github.com/golang-jwt/jwt/v5 v5.3.0
+ 	github.com/google/go-tdx-guest v0.3.2-0.20250814004405-ffb0869e6f4d
+ 	github.com/google/go-tpm v0.9.7
++	github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9
+ 	github.com/lmittmann/tint v1.1.2
+ 	github.com/mattn/go-isatty v0.0.20
+ 	github.com/ollama/ollama v0.13.0
+@@ -33,9 +34,11 @@ require (
+ )
+ 
+ require (
++	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
+ 	github.com/openpcc/bhttp v0.0.79 // indirect
+ 	github.com/openpcc/ohttp v0.0.79 // indirect
+ 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
++	github.com/x448/float16 v0.8.4 // indirect
+ )
+ 
+ require (
+diff --git a/go.sum b/go.sum
+index 2e1f25c..374670e 100644
+--- a/go.sum
++++ b/go.sum
+@@ -813,6 +813,9 @@ github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2
+ github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
+ github.com/fogleman/gg v1.2.1-0.20190220221249-0403632d5b90/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzPa1k=
+ github.com/fogleman/gg v1.3.0/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzPa1k=
++github.com/fxamacker/cbor/v2 v2.2.0/go.mod h1:TA1xS00nchWmaBnEIxPSE5oHLuJBAVvqrtAnWBwBCVo=
++github.com/fxamacker/cbor/v2 v2.7.0 h1:iM5WgngdRBanHcxugY4JySA0nk1wZorNOpTgCMedv5E=
++github.com/fxamacker/cbor/v2 v2.7.0/go.mod h1:pxXPTn3joSm21Gbwsv0w9OSA2y1HFR9qXEeXQVeNoDQ=
+ github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
+ github.com/go-chi/chi v4.1.2+incompatible h1:fGFk2Gmi/YKXk0OmGfBh0WgmN3XB8lVnEyNz34tQRec=
+ github.com/go-chi/chi/v5 v5.2.3 h1:WQIt9uxdsAbgIYgid+BpYc+liqQZGMHRaUwp0JUcvdE=
+@@ -1070,6 +1071,8 @@ github.com/hashicorp/hcl v1.0.0 h1:0Anlzjpi4vEasTeNFn2mLJgTSwt0+6sfsiTG8qcWGx4=
+ github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
+ github.com/hashicorp/vault/api v1.16.0 h1:nbEYGJiAPGzT9U4oWgaaB0g+Rj8E59QuHKyA5LhwQN4=
+ github.com/hashicorp/vault/api v1.16.0/go.mod h1:KhuUhzOD8lDSk29AtzNjgAu2kxRA9jL9NAbkFlqvkBA=
++github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9 h1:pU32bJGmZwF4WXb9Yaz0T8vHDtIPVxqDOdmYdwTQPqw=
++github.com/hf/nsm v0.0.0-20220930140112-cd181bd646b9/go.mod h1:MJsac5D0fKcNWfriUERtln6segcGfD6Nu0V5uGBbPf8=
+ github.com/howeyc/gopass v0.0.0-20210920133722-c8aef6fb66ef h1:A9HsByNhogrvm9cWb28sjiS3i7tcKCkflWFEkHfuAgM=
+ github.com/howeyc/gopass v0.0.0-20210920133722-c8aef6fb66ef/go.mod h1:lADxMC39cJJqL93Duh1xhAs4I2Zs8mKS89XWXFGp9cs=
+ github.com/iancoleman/strcase v0.2.0/go.mod h1:iwCmte+B7n89clKwxIoIXy/HfoL7AsD47ZCWhYzw7ho=
+@@ -1288,6 +1293,8 @@ github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6Kllzaw
+ github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
+ github.com/valyala/fasttemplate v1.2.2 h1:lxLXG0uE3Qnshl9QyaK6XJxMXlQZELvChBOCmQD0Loo=
+ github.com/valyala/fasttemplate v1.2.2/go.mod h1:KHLXt3tVN2HBp8eijSv/kGJopbvo7S+qRAEEKiv+SiQ=
++github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
++github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
+ github.com/ysmood/fetchup v0.2.3 h1:ulX+SonA0Vma5zUFXtv52Kzip/xe7aj4vqT5AJwQ+ZQ=
+ github.com/ysmood/fetchup v0.2.3/go.mod h1:xhibcRKziSvol0H1/pj33dnKrYyI2ebIvz5cOOkYGns=
+ github.com/ysmood/goob v0.4.0 h1:HsxXhyLBeGzWXnqVKtmT9qM7EuVs/XOgkX7T6r1o1AQ=
+@@ -1712,6 +1716,7 @@ golang.org/x/tools v0.0.0-20201124115921-2c860bdd6e78/go.mod h1:emZCQorbCU4vsT4f
+ golang.org/x/tools v0.0.0-20201201161351-ac6f37ff4c2a/go.mod h1:emZCQorbCU4vsT4fOWvOPXz4eW1wZW4PmDk9uLelYpA=
+ golang.org/x/tools v0.0.0-20201208233053-a543418bbed2/go.mod h1:emZCQorbCU4vsT4fOWvOPXz4eW1wZW4PmDk9uLelYpA=
+ golang.org/x/tools v0.0.0-20210105154028-b0ab187a4818/go.mod h1:emZCQorbCU4vsT4fOWvOPXz4eW1wZW4PmDk9uLelYpA=
++golang.org/x/tools v0.0.0-20210105210202-9ed45478a130/go.mod h1:emZCQorbCU4vsT4fOWvOPXz4eW1wZW4PmDk9uLelYpA=
+ golang.org/x/tools v0.0.0-20210108195828-e2f9c7f1fc8e/go.mod h1:emZCQorbCU4vsT4fOWvOPXz4eW1wZW4PmDk9uLelYpA=
+ golang.org/x/tools v0.1.0/go.mod h1:xkSsbof2nBLbhDlRMhhhyNLN/zl3eTqcnHD5viDpcZ0=
+ golang.org/x/tools v0.1.1/go.mod h1:o0xws9oXOQQZyjljx8fwUC0k7L1pTE6eaCbjGeHmOkk=
