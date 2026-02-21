@@ -21,6 +21,7 @@ require_env PU
 require_env SB
 require_env ES
 require_env COMPUTE_IMAGE_URI
+require_env EVIDENCE_VSOCK_PORT
 
 HOME="${HOME:-/root}"
 export HOME
@@ -71,6 +72,9 @@ envsubst '${TC} ${TP} ${SB}' < "${ES}/config/compute_boot.yaml.tmpl" > "${CONFIG
 
 cat > "${CONFIG_DIR}/Dockerfile" <<DOCKER_EOF
 FROM ${COMPUTE_IMAGE_URI}
+ENV SKIP_COMPUTE_BOOT=true
+ENV EVIDENCE_VSOCK_PORT=${EVIDENCE_VSOCK_PORT}
+ENV EVIDENCE_SOCKET=/tmp/router.sock
 COPY router_com.yaml /etc/openpcc/router_com.yaml
 COPY binary_bios_measurements /etc/openpcc/binary_bios_measurements
 COPY compute_boot.yaml /etc/openpcc/compute_boot.yaml

@@ -184,6 +184,9 @@ Stage C는 server-2의 **REK tag/이미지 digest**를 확인한 뒤 server-3 �
 
 > 배포 스크립트는 Nitro Enclave 실행을 전제로 합니다. Docker 기반 테스트는 로컬/CI 스모크 테스트 용도입니다.
 
+> server-2는 **호스트에서 compute_boot를 실행**하고, evidence는 **VSOCK 브릿지로 enclave의 router_com**에 전달합니다.  
+> 따라서 호스트에서 `/dev/tpmrm0` 및 `/sys/kernel/security/tpm0/binary_bios_measurements` 접근이 가능해야 합니다.
+
 ### 6-1. 필수 입력값 (직접 입력 또는 저장값 필요)
 
 - `aws_region`

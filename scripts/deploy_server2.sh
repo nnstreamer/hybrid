@@ -30,6 +30,7 @@ ROUTER_ADDRESS="${ROUTER_ADDRESS:-}"
 ENCLAVE_CPU_COUNT="${ENCLAVE_CPU_COUNT:-2}"
 ENCLAVE_MEMORY_MIB="${ENCLAVE_MEMORY_MIB:-2048}"
 ENCLAVE_CID="${ENCLAVE_CID:-16}"
+EVIDENCE_VSOCK_PORT="${EVIDENCE_VSOCK_PORT:-4500}"
 ROUTER_PROXY_HOST="${ROUTER_PROXY_HOST:-127.0.0.1}"
 ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
@@ -352,6 +353,7 @@ PP="${ROUTER_PROXY_PORT}"
 TC="${TPM_SIMULATOR_CMD_PORT}"
 TP="${TPM_SIMULATOR_PLATFORM_PORT}"
 EC="${ENCLAVE_CID}"
+EVP="${EVIDENCE_VSOCK_PORT}"
 CPU="${ENCLAVE_CPU_COUNT}"
 MEM="${ENCLAVE_MEMORY_MIB}"
 NR="${NITRO_RUN_ARGS}"
@@ -382,10 +384,13 @@ docker pull "${compute_image_uri}"
 mkdir -p "\${ES}"
 cid=\$(docker create "${compute_image_uri}")
 docker cp "\${cid}:/enclave_scripts/." "\${ES}"
+CB="/opt/openpcc/compute_boot"
+mkdir -p "/opt/openpcc"
+docker cp "\${cid}:/opt/confidentcompute/bin/compute_boot" "\${CB}"
+chmod +x "\${CB}"
 docker rm "\${cid}"
 
 EF="/opt/openpcc/compute.eif"
-mkdir -p "/opt/openpcc"
 if [[ -z "\${SB}" && -n "\${BR}" ]]; then
   echo "Fetching sigstore bundle: \${BR}"
   OT="/tmp/oras.tgz"
@@ -457,13 +462,14 @@ if [[ ! -x "\${TB}" ]]; then
   )
 fi
 
-export TB TC TP PP RH RP RC EC CPU MEM NR
+export TB TC TP PP RH RP RC EC CPU MEM NR EVP
 envsubst '\${TB} \${TC}' < "\${ES}/systemd/openpcc-tpm-sim.service.tmpl" > /etc/systemd/system/openpcc-tpm-sim.service
 envsubst '\${PP} \${RH} \${RP}' < "\${ES}/systemd/openpcc-vsock-router.service.tmpl" > /etc/systemd/system/openpcc-vsock-router.service
 envsubst '\${TC}' < "\${ES}/systemd/openpcc-vsock-tpm-cmd.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-cmd.service
 envsubst '\${TP}' < "\${ES}/systemd/openpcc-vsock-tpm-platform.service.tmpl" > /etc/systemd/system/openpcc-vsock-tpm-platform.service
 envsubst '\${RC} \${EC}' < "\${ES}/systemd/openpcc-enclave-health-proxy.service.tmpl" > /etc/systemd/system/openpcc-enclave-health-proxy.service
 envsubst '\${CPU} \${MEM} \${EC} \${NR}' < "\${ES}/systemd/openpcc-enclave.service.tmpl" > /etc/systemd/system/openpcc-enclave.service
+envsubst '\${EC} \${EVP}' < "\${ES}/systemd/openpcc-evidence-bridge.service.tmpl" > /etc/systemd/system/openpcc-evidence-bridge.service
 cp "\${ES}/systemd/openpcc-enclave-prepare.service.tmpl" /etc/systemd/system/openpcc-enclave-prepare.service
 
 systemctl daemon-reload
@@ -484,6 +490,33 @@ fi
 export NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 mkdir -p "\${NITRO_CLI_ARTIFACTS}"
 
+HOST_BOOT_CONFIG="/etc/openpcc/compute_boot.host.yaml"
+HOST_BOOT_ENV="/etc/openpcc/compute-boot-host.env"
+HOST_BOOT_BIN="\${CB}"
+mkdir -p /etc/openpcc
+cat > "\${HOST_BOOT_ENV}" <<EOF_ENV
+TPM_TYPE=QEMU
+TPM_EVENT_LOG_PATH=/sys/kernel/security/tpm0/binary_bios_measurements
+INFERENCE_ENGINE_SKIP=true
+EOF_ENV
+chmod 600 "\${HOST_BOOT_ENV}"
+export TC TP SB
+envsubst '\${TC} \${TP} \${SB}' < "\${ES}/config/compute_boot.yaml.tmpl" > "\${HOST_BOOT_CONFIG}"
+chmod 600 "\${HOST_BOOT_CONFIG}"
+
+EVIDENCE_ENV="/etc/openpcc/evidence-bridge.env"
+cat > "\${EVIDENCE_ENV}" <<EOF_ENV
+EC=\${EC}
+EVP=\${EVP}
+EOF_ENV
+chmod 600 "\${EVIDENCE_ENV}"
+export HOST_BOOT_CONFIG HOST_BOOT_ENV HOST_BOOT_BIN
+envsubst '\${HOST_BOOT_CONFIG} \${HOST_BOOT_ENV} \${HOST_BOOT_BIN}' < "\${ES}/systemd/openpcc-compute-boot-host.service.tmpl" > /etc/systemd/system/openpcc-compute-boot-host.service
+
+systemctl daemon-reload
+systemctl enable openpcc-evidence-bridge.service
+systemctl enable openpcc-compute-boot-host.service
+
 ELS="\${TPM_EVENT_LOG_SOURCE:-/sys/kernel/security/tpm0/binary_bios_measurements}"
 EWS="\${TPM_EVENT_LOG_WAIT_SECONDS:-180}"
 EWI="\${TPM_EVENT_LOG_WAIT_INTERVAL:-2}"
@@ -498,6 +531,7 @@ PU=\${PU}
 SB=\${SB}
 ES=\${ES}
 COMPUTE_IMAGE_URI=${compute_image_uri}
+EVIDENCE_VSOCK_PORT=\${EVP}
 HOME=/root
 NITRO_CLI_ARTIFACTS=/var/lib/nitro_enclaves/artifacts
 TPM_EVENT_LOG_SOURCE=\${ELS}
@@ -508,6 +542,8 @@ chmod 600 "\${ENV_FILE}"
 chmod +x "\${ES}/openpcc-enclave-prepare.sh"
 
 systemctl start openpcc-enclave.service
+systemctl start openpcc-evidence-bridge.service
+systemctl start openpcc-compute-boot-host.service
 
 if command -v aws >/dev/null 2>&1 && command -v tpm2_readpublic >/dev/null 2>&1; then
   export TPM2TOOLS_TCTI="mssim:host=127.0.0.1,port=\${TC}"

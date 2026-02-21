@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenPCC compute_boot (host TPM)
+After=network-online.target openpcc-enclave.service openpcc-evidence-bridge.service
+Wants=network-online.target openpcc-evidence-bridge.service
+Requires=openpcc-enclave.service openpcc-evidence-bridge.service
+ConditionPathExists=${HOST_BOOT_CONFIG}
+ConditionPathExists=${HOST_BOOT_BIN}
+
+[Service]
+Type=simple
+EnvironmentFile=${HOST_BOOT_ENV}
+ExecStart=${HOST_BOOT_BIN} -config ${HOST_BOOT_CONFIG}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

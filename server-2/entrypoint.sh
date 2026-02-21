@@ -65,6 +65,8 @@ ROUTER_PROXY_PORT="${ROUTER_PROXY_PORT:-3600}"
 TPM_SIMULATOR_CMD_PORT="${TPM_SIMULATOR_CMD_PORT:-2321}"
 TPM_SIMULATOR_PLATFORM_PORT="${TPM_SIMULATOR_PLATFORM_PORT:-2322}"
 ROUTER_COM_PORT="${ROUTER_COM_PORT:-8081}"
+EVIDENCE_VSOCK_PORT="${EVIDENCE_VSOCK_PORT:-}"
+EVIDENCE_SOCKET="${EVIDENCE_SOCKET:-/tmp/router.sock}"
 OLLAMA_BIN="${OLLAMA_BIN:-/usr/local/bin/ollama}"
 OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 if [[ "${OLLAMA_HOST}" == http* ]]; then
@@ -107,6 +109,18 @@ start_vsock_proxies() {
   fi
 }
 
+start_evidence_bridge() {
+  if [[ -z "${EVIDENCE_VSOCK_PORT}" ]]; then
+    log "Evidence VSOCK bridge disabled (EVIDENCE_VSOCK_PORT empty)"
+    return 0
+  fi
+
+  log "Starting evidence VSOCK bridge (vsock=${EVIDENCE_VSOCK_PORT}, socket=${EVIDENCE_SOCKET})"
+  socat VSOCK-LISTEN:${EVIDENCE_VSOCK_PORT},reuseaddr,fork \
+    UNIX-CONNECT:${EVIDENCE_SOCKET} &
+  local evidence_bridge_pid=$!
+  log_pid_status "socat evidence bridge" "${evidence_bridge_pid}"
+}
 start_ollama() {
   if [[ ! -x "${OLLAMA_BIN}" ]]; then
     log "Ollama binary not found at ${OLLAMA_BIN}; skipping"
@@ -153,6 +167,7 @@ log_loopback_status
 ensure_loopback_up
 log_loopback_status
 start_vsock_proxies
+start_evidence_bridge
 start_ollama
 
 if [[ "${SKIP_COMPUTE_BOOT:-false}" != "true" ]]; then
